@@ -1,0 +1,485 @@
+using System;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Reflection;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace AutoInstall
+{
+    // Janela unica do programa. O rodape (credito + site) fica fixo do inicio
+    // ao fim; a area central troca entre splash, progresso, reinicio e final.
+    public class MainForm : Form
+    {
+        readonly bool retomada;
+        readonly bool preview;
+
+        Estado estado;
+        Panel conteudo;
+        FadeImagem splash;
+        TelaProgresso telaProg;
+        TelaReiniciar telaReiniciar;
+        TelaFinal telaFinal;
+        Image guaxinim;
+
+        public MainForm(bool retomada, bool preview)
+        {
+            this.retomada = retomada;
+            this.preview = preview;
+
+            Text = "AutoInstall Pós-Formatação · Smells Like Tech";
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false;
+            ClientSize = new Size(920, 660);
+            StartPosition = FormStartPosition.CenterScreen;
+            BackColor = Tema.Fundo;
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+
+            guaxinim = CarregarGuaxinim();
+
+            // Rodape permanente: credito + site clicavel
+            var rodape = new Panel();
+            rodape.Dock = DockStyle.Bottom;
+            rodape.Height = 58;
+            rodape.BackColor = Tema.FundoEscuro;
+            rodape.Paint += delegate(object s, PaintEventArgs e)
+            {
+                using (var pen = new Pen(Color.FromArgb(70, 52, 26)))
+                    e.Graphics.DrawLine(pen, 0, 0, rodape.Width, 0);
+            };
+
+            var lblCredito = new Label();
+            lblCredito.Text = "Criado por Maicon Nunes, da Smells Like Tech Informática";
+            lblCredito.Font = new Font("Segoe UI", 9.75f);
+            lblCredito.ForeColor = Tema.Texto;
+            lblCredito.TextAlign = ContentAlignment.MiddleCenter;
+            lblCredito.SetBounds(0, 7, 920, 22);
+            rodape.Controls.Add(lblCredito);
+
+            var linkSite = new LinkLabel();
+            linkSite.Text = Tema.SITE_TEXTO;
+            linkSite.Font = new Font("Segoe UI", 9.75f);
+            linkSite.LinkColor = Tema.Laranja;
+            linkSite.ActiveLinkColor = Tema.LaranjaClaro;
+            linkSite.VisitedLinkColor = Tema.Laranja;
+            linkSite.TextAlign = ContentAlignment.MiddleCenter;
+            linkSite.SetBounds(0, 29, 920, 22);
+            linkSite.LinkClicked += delegate { Tema.AbrirSite(); };
+            rodape.Controls.Add(linkSite);
+
+            conteudo = new Panel();
+            conteudo.Dock = DockStyle.Fill;
+            conteudo.BackColor = Tema.Fundo;
+
+            Controls.Add(rodape);
+            Controls.Add(conteudo);
+            conteudo.BringToFront();
+
+            splash = new FadeImagem();
+            splash.Imagem = guaxinim;
+
+            telaProg = new TelaProgresso();
+            telaReiniciar = new TelaReiniciar();
+            telaReiniciar.AoReiniciar += delegate { ReiniciarAgora(); };
+            telaFinal = new TelaFinal(guaxinim);
+            telaFinal.AoFechar += delegate { Close(); };
+
+            Shown += delegate { Fluxo(); };
+        }
+
+        static Image CarregarGuaxinim()
+        {
+            try
+            {
+                var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("Guaxinim.jpg");
+                if (st != null) return Image.FromStream(st);
+            }
+            catch { }
+            try
+            {
+                string p = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "Guaxinim.jpg");
+                if (File.Exists(p)) return Image.FromFile(p);
+            }
+            catch { }
+            return null;
+        }
+
+        void Mostrar(Control tela)
+        {
+            conteudo.Controls.Clear();
+            tela.Dock = DockStyle.Fill;
+            conteudo.Controls.Add(tela);
+        }
+
+        // Splash do Guaxinim: fade in, pausa e fade out (5 s cada fade na
+        // primeira execucao; rapido nas retomadas pos-reinicio).
+        Task AnimarSplash(int entradaMs, int pausaMs, int saidaMs)
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            Mostrar(splash);
+            var cronometro = Stopwatch.StartNew();
+            long total = entradaMs + pausaMs + saidaMs;
+            var t = new Timer();
+            t.Interval = 30;
+            t.Tick += delegate
+            {
+                long ms = cronometro.ElapsedMilliseconds;
+                if (ms >= total)
+                {
+                    t.Stop();
+                    t.Dispose();
+                    splash.Alfa = 0f;
+                    tcs.TrySetResult(true);
+                    return;
+                }
+                float a;
+                if (ms < entradaMs) a = ms / (float)entradaMs;
+                else if (ms < entradaMs + pausaMs) a = 1f;
+                else a = 1f - (ms - entradaMs - pausaMs) / (float)saidaMs;
+                splash.Alfa = a;
+            };
+            t.Start();
+            return tcs.Task;
+        }
+
+        async void Fluxo()
+        {
+            if (retomada) await AnimarSplash(900, 400, 700);
+            else await AnimarSplash(5000, 900, 5000);
+
+            estado = Estado.Carregar();
+            Mostrar(telaProg);
+
+            if (preview)
+            {
+                await FluxoPreview();
+                return;
+            }
+
+            try
+            {
+                await FluxoReal();
+            }
+            catch (Exception ex)
+            {
+                telaProg.Log("ERRO INESPERADO: " + ex.Message);
+                telaProg.Log("Feche e abra o programa novamente para retomar do ponto salvo.");
+            }
+        }
+
+        async Task FluxoReal()
+        {
+            Action<string> log = telaProg.Log;
+
+            // Ja terminou tudo em execucao anterior? So mostra o relatorio.
+            if (estado.Fase == "concluido")
+            {
+                Mostrar(telaFinal);
+                telaFinal.Preencher(estado);
+                return;
+            }
+
+            // 1) Energia no maximo (uma unica vez)
+            if (!estado.EnergiaConfigurada)
+            {
+                telaProg.Fase("Preparando o computador");
+                telaProg.Etapa("Ativando plano de energia de desempenho máximo (temporário)...");
+                telaProg.Progresso(15, "");
+                await Task.Run(delegate { Energia.AtivarMaximo(estado, log); });
+                estado.EnergiaConfigurada = true;
+                if (estado.Fase == "energia") estado.Fase = "updates";
+                estado.Salvar();
+                telaProg.Progresso(100, "");
+            }
+
+            // 2) Windows Update em rodadas (reinicia entre elas)
+            if (estado.Fase == "updates")
+            {
+                bool continuar = await FaseUpdates(log);
+                if (!continuar) return;   // vai reiniciar; o resto fica para depois
+            }
+
+            // 3) Programas essenciais
+            if (estado.Fase == "apps") await FaseApps(log);
+
+            // 4) Atualizacao geral de aplicativos (ate zerar)
+            if (estado.Fase == "upgrade") await FaseUpgrade(log);
+
+            // 5) Energia recomendada + relatorio final
+            await Finalizar(log);
+        }
+
+        // Retorna true para seguir para a proxima fase; false quando o
+        // computador vai reiniciar (a tarefa agendada retoma depois).
+        async Task<bool> FaseUpdates(Action<string> log)
+        {
+            var atualizador = new AtualizadorWindows();
+            int rodada = estado.Rodadas.Count + 1;
+            telaProg.Fase(string.Format("Windows Update — verificação {0}", rodada));
+
+            if (estado.Reinicios >= 8)
+            {
+                log("Limite de reinicializações atingido; seguindo para a instalação de programas.");
+                estado.Fase = "apps";
+                estado.Salvar();
+                return true;
+            }
+
+            telaProg.Contagens("Consultando o Windows Update, isso pode levar alguns minutos...");
+            telaProg.Etapa("Procurando atualizações (incluindo opcionais e drivers)...");
+            telaProg.Progresso(0, "");
+
+            ResultadoBusca busca = null;
+            for (int tentativa = 1; tentativa <= 3; tentativa++)
+            {
+                Exception falha = null;
+                try { busca = await Task.Run(delegate { return atualizador.Buscar(); }); }
+                catch (Exception ex) { falha = ex; }
+                if (busca != null) break;
+                log(string.Format("Falha ao consultar o Windows Update (tentativa {0}/3): {1}",
+                    tentativa, falha.Message));
+                if (tentativa < 3) await Task.Delay(20000);
+            }
+            if (busca == null)
+            {
+                log("Windows Update inacessível; seguindo para a instalação de programas.");
+                estado.Fase = "apps";
+                estado.Salvar();
+                return true;
+            }
+
+            telaProg.Contagens(string.Format(
+                "Atualizações encontradas: {0}   ·   Opcionais/drivers: {1}",
+                busca.Total, busca.Opcionais));
+            if (busca.Ignorados > 0)
+                log(string.Format("{0} atualização(ões) que exigem interação foram puladas.", busca.Ignorados));
+
+            if (busca.Total == 0)
+            {
+                log("Nenhuma atualização pendente — Windows 100% atualizado!");
+                estado.Fase = "apps";
+                estado.Salvar();
+                return true;
+            }
+
+            foreach (var item in busca.Itens)
+                log((item.Driver ? "[driver] " : item.Opcional ? "[opcional] " : "") + item.Titulo);
+
+            // Download com percentual real
+            telaProg.Etapa(string.Format("Baixando {0} atualização(ões)...", busca.Total));
+            atualizador.AoProgredirDownload = delegate(int geral, int idx, int pctItem, string titulo)
+            {
+                telaProg.Progresso(geral, string.Format("Baixando {0} de {1} ({2}% desta) — {3}",
+                    idx, busca.Total, pctItem, Curto(titulo)));
+            };
+            await Task.Run(delegate { atualizador.Baixar(busca); });
+            telaProg.Progresso(100, "Download concluído.");
+            log("Download de todas as atualizações concluído.");
+
+            // Instalacao com percentual real
+            telaProg.Etapa(string.Format("Instalando {0} atualização(ões)...", busca.Total));
+            telaProg.Progresso(0, "");
+            atualizador.AoProgredirInstalacao = delegate(int geral, int idx, int pctItem, string titulo)
+            {
+                telaProg.Progresso(geral, string.Format("Instalando {0} de {1} ({2}% desta) — {3}",
+                    idx, busca.Total, pctItem, Curto(titulo)));
+            };
+            await Task.Run(delegate { atualizador.Instalar(busca); });
+            telaProg.Progresso(100, "Instalação concluída.");
+            log("Instalação desta rodada concluída.");
+
+            var registro = new RodadaUpdates();
+            registro.Numero = rodada;
+            foreach (var item in busca.Itens)
+                registro.Atualizacoes.Add(item.Titulo +
+                    (item.Resultado == "ok" ? "" : " [" + item.Resultado + "]"));
+            estado.Rodadas.Add(registro);
+            estado.Reinicios++;
+            estado.Salvar();
+
+            TarefaInicio.Criar(log);
+            Mostrar(telaReiniciar);
+            telaReiniciar.Iniciar();
+            return false;
+        }
+
+        async Task FaseApps(Action<string> log)
+        {
+            var lista = InstaladorApps.Programas;
+            telaProg.Fase("Instalação de programas");
+            telaProg.Contagens(string.Format(
+                "{0} programas: Chrome · Acrobat Reader · WinRAR · K-Lite (codecs + player) · Office 365",
+                lista.Length));
+            telaProg.Progresso(0, "");
+
+            var instalador = new InstaladorApps();
+            telaProg.Etapa("Verificando o winget (Windows Package Manager)...");
+            bool temWinget = await Task.Run(delegate { return instalador.Garantir(log); });
+
+            for (int i = 0; i < lista.Length; i++)
+            {
+                var alvo = lista[i];
+                int indice = i;
+                telaProg.Etapa(string.Format("Instalando {0} de {1}: {2}", i + 1, lista.Length, alvo.Nome));
+                telaProg.Progresso((int)(i * 100.0 / lista.Length), alvo.Nome);
+
+                AppInstalado app;
+                if (!temWinget)
+                {
+                    app = new AppInstalado();
+                    app.Nome = alvo.Nome;
+                    app.Id = alvo.Id;
+                    app.Status = "não instalado (winget indisponível)";
+                }
+                else
+                {
+                    app = await Task.Run(delegate
+                    {
+                        return instalador.Instalar(alvo, log, delegate(int pctApp)
+                        {
+                            int geral = (int)((indice + pctApp / 100.0) * 100.0 / lista.Length);
+                            telaProg.Progresso(geral, string.Format("{0}: {1}%", alvo.Nome, pctApp));
+                        });
+                    });
+                }
+                estado.Apps.Add(app);
+                estado.Salvar();
+                log(string.Format("{0} — {1}{2}", app.Nome, app.Status,
+                    string.IsNullOrEmpty(app.Versao) ? "" : " (versão " + app.Versao + ")"));
+            }
+
+            telaProg.Progresso(100, "Programas concluídos.");
+            estado.Fase = "upgrade";
+            estado.Salvar();
+        }
+
+        async Task FaseUpgrade(Action<string> log)
+        {
+            telaProg.Fase("Atualizando todos os aplicativos");
+            telaProg.Contagens("Apps da Microsoft Store + programas comuns (winget)");
+
+            // 1) Apps da Microsoft Store — mesma ação do botão "Atualizar todos"
+            //    da Loja (o winget não cobre bem os apps UWP).
+            telaProg.Etapa("Atualizando os apps da Microsoft Store...");
+            telaProg.Progresso(0, "");
+            var loja = new LojaMicrosoft();
+            loja.AoLogar = log;
+            loja.AoProgredir = delegate(int pct, string detalhe)
+            {
+                telaProg.Progresso(pct, detalhe);
+            };
+            bool lojaOk = await Task.Run(delegate { return loja.Atualizar(estado); });
+            if (!lojaOk)
+            {
+                log("Não consegui acionar a atualização automática da Loja; abrindo a página " +
+                    "de atualizações da Microsoft Store para acompanhar manualmente.");
+                try { Process.Start("ms-windows-store://downloadsandupdates"); } catch { }
+            }
+
+            // 2) Programas comuns via winget, em passadas até zerar
+            telaProg.Etapa("Rodando a atualização geral do winget (repete até não sobrar nada)...");
+            telaProg.Progresso(0, "");
+
+            var instalador = new InstaladorApps();
+            bool temWinget = await Task.Run(delegate { return instalador.Garantir(log); });
+            if (temWinget)
+            {
+                await Task.Run(delegate
+                {
+                    instalador.AtualizarTudo(estado, log, delegate(int pct)
+                    {
+                        telaProg.Progresso(pct, null);
+                    });
+                });
+            }
+            else
+            {
+                log("winget indisponível — atualização geral de aplicativos pulada.");
+            }
+
+            telaProg.Progresso(100, "");
+            estado.Fase = "fim";
+            estado.Salvar();
+        }
+
+        async Task Finalizar(Action<string> log)
+        {
+            telaProg.Fase("Finalizando");
+            telaProg.Etapa("Restaurando o plano de energia recomendado...");
+            await Task.Run(delegate { Energia.Restaurar(estado, log); });
+            TarefaInicio.Remover();
+            estado.Fase = "concluido";
+            estado.Salvar();
+
+            Mostrar(telaFinal);
+            telaFinal.Preencher(estado);
+        }
+
+        void ReiniciarAgora()
+        {
+            Estado.LogArquivo("Reiniciando o computador...");
+            Executor.Rodar("shutdown.exe", "/r /t 3");
+            Application.Exit();
+        }
+
+        static string Curto(string titulo)
+        {
+            if (string.IsNullOrEmpty(titulo)) return "";
+            if (titulo.Length <= 58) return titulo;
+            return titulo.Substring(0, 57) + "…";
+        }
+
+        // Modo --preview: so demonstra as telas com dados ficticios.
+        async Task FluxoPreview()
+        {
+            telaProg.Fase("Windows Update — verificação 1 (PRÉVIA)");
+            telaProg.Contagens("Atualizações encontradas: 7   ·   Opcionais/drivers: 3");
+            telaProg.Etapa("Baixando 7 atualização(ões)... (simulação — nada é executado)");
+            for (int p = 0; p <= 100; p += 2)
+            {
+                telaProg.Progresso(p, string.Format("Baixando {0} de 7 ({1}% desta) — Atualização de exemplo",
+                    1 + p * 6 / 100, p));
+                await Task.Delay(35);
+            }
+            telaProg.Log("Download de todas as atualizações concluído. (simulação)");
+            telaProg.Etapa("Instalando 7 atualização(ões)... (simulação)");
+            for (int p = 0; p <= 100; p += 2)
+            {
+                telaProg.Progresso(p, string.Format("Instalando {0} de 7 ({1}% desta) — Atualização de exemplo",
+                    1 + p * 6 / 100, p));
+                await Task.Delay(35);
+            }
+
+            var fake = new Estado();
+            fake.InicioEm = DateTime.Now.ToString("dd/MM/yyyy HH:mm");
+            fake.Reinicios = 2;
+            var rodada = new RodadaUpdates();
+            rodada.Numero = 1;
+            rodada.Atualizacoes.Add("Atualização Cumulativa para Windows 11 (KB5044033)");
+            rodada.Atualizacoes.Add("Intel Corporation - Display - 31.0.101.4502");
+            rodada.Atualizacoes.Add("Atualização de Definições do Microsoft Defender (KB2267602)");
+            fake.Rodadas.Add(rodada);
+            fake.Apps.Add(AppFake("Google Chrome", "Google.Chrome", "138.0.7204.97"));
+            fake.Apps.Add(AppFake("Adobe Acrobat Reader", "Adobe.Acrobat.Reader.64-bit", "25.001.20521"));
+            fake.Apps.Add(AppFake("WinRAR", "RARLab.WinRAR", "7.12"));
+            fake.Apps.Add(AppFake("K-Lite Codec Pack (codecs + player MPC-HC)", "CodecGuide.K-LiteCodecPack.Standard", "18.9.5"));
+            fake.Apps.Add(AppFake("Microsoft 365 (Office)", "Microsoft.Office", "16.0.18827.20202"));
+            fake.Upgrades.Add("Passada 1 concluída (código 0).");
+            fake.Upgrades.Add("Verificação final: nenhum aplicativo pendente.");
+
+            Mostrar(telaFinal);
+            telaFinal.Preencher(fake);
+        }
+
+        static AppInstalado AppFake(string nome, string id, string versao)
+        {
+            var a = new AppInstalado();
+            a.Nome = nome;
+            a.Id = id;
+            a.Versao = versao;
+            a.Status = "instalado";
+            return a;
+        }
+    }
+}
