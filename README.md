@@ -80,12 +80,29 @@ de Visual Studio**. Na primeira compilação, o script gera automaticamente:
 
 ### Logo
 
-`assets\guaxinim.png` é o Guaxinim recortado com fundo transparente — arquivo
-versionado do projeto, usado na abertura e no topo da tela final. Para trocar
-a arte, substitua esse PNG (mantendo a transparência), **apague `icon.ico`** e
-compile: o ícone é refeito a partir dele. O gerador de ícone acha a cabeça
-sozinho pela transparência, então não depende das proporções do recorte.
-`Guaxinim.jpg` é a arte original, guardada só como referência.
+| Arquivo | O que é |
+|---|---|
+| `assets\guaxinim-origem.png` | O recorte original, **intocado** — é a fonte |
+| `assets\guaxinim.png` | Versão de exibição, gerada; é a que vai no executável |
+
+`tools\preparar-logo.ps1` gera a segunda a partir da primeira, fazendo duas
+coisas que valem explicação:
+
+- **Sangria de cor nas bordas.** O recorte veio de remoção de fundo verde, e os
+  pixels 100% transparentes ainda guardam esse verde no RGB. Parado não se vê,
+  mas a abertura desenha a imagem reduzida, e a interpolação mistura o RGB dos
+  vizinhos **inclusive dos transparentes** — o verde vaza como franja em volta
+  do personagem. A correção espalha a cor dos pixels opacos para dentro da área
+  transparente, sem mexer no canal alfa.
+- **Dissolução das bordas cortadas.** A base (e o trecho da lateral onde o
+  personagem encosta na moldura) se dissolve no transparente: numa janela sem
+  fundo, flutuando sobre a área de trabalho, um corte reto denuncia o recorte.
+  Só as bordas onde ele realmente encosta são tratadas — detectado sozinho.
+
+Para trocar a arte: substitua `guaxinim-origem.png`, **apague `guaxinim.png` e
+`icon.ico`** e compile. O gerador de ícone acha a cabeça sozinho pela
+transparência, então não depende das proporções do novo recorte.
+`Guaxinim.jpg` é a arte original em foto, guardada só como referência.
 
 Saída: **`bin\AutoInstall.exe`** — arquivo único (imagem e interop embutidas),
 pronto para o pendrive. Requer administrador (manifesto).

@@ -18,10 +18,14 @@ if not exist lib\Interop.WUApiLib.dll (
   exit /b 1
 )
 
-rem Logo recortado (PNG com fundo transparente), usado na abertura e no topo
-rem da tela final. E um arquivo versionado do projeto, nao gerado no build.
+rem Logo de exibicao: sangria de cor nas bordas (tira a franja verde do croma
+rem ao redimensionar) e dissolucao das bordas cortadas pela moldura da imagem.
+rem Gerado do recorte original, que fica intacto em assets\guaxinim-origem.png.
 if not exist assets\guaxinim.png (
-  echo *** FALHA: coloque o logo recortado em assets\guaxinim.png ***
+  "%PS%" -NoProfile -ExecutionPolicy Bypass -File tools\preparar-logo.ps1
+)
+if not exist assets\guaxinim.png (
+  echo *** FALHA: coloque o recorte em assets\guaxinim-origem.png ***
   exit /b 1
 )
 

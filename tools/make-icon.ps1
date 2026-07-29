@@ -64,11 +64,11 @@ public static class Cabeca
             int lado = Math.Max(larguraCabeca, alturaCabeca);
             lado += lado / 12;                       // respiro em volta
             int cx = (fx0 + fx1) / 2;
-            int x = cx - lado / 2;
-            int y = y0 - lado / 20;
+            int qx = cx - lado / 2;
+            int qy = y0 - lado / 20;
             Console.WriteLine("Sujeito: " + x0 + "," + y0 + " ate " + x1 + "," + y1 +
-                              "  ->  cabeca: " + x + "," + y + " lado " + lado);
-            return new int[] { x, y, lado };
+                              "  ->  cabeca: " + qx + "," + qy + " lado " + lado);
+            return new int[] { qx, qy, lado };
         }
     }
 }
