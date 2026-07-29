@@ -1,27 +1,27 @@
-# Gera icon.ico a partir de Guaxinim.jpg (recorte quadrado do rosto,
-# redimensionado em varios tamanhos, PNGs embutidos num container ICO).
+# Gera icon.ico a partir do recorte transparente (assets\guaxinim.png):
+# a cabeca do Guaxinim, centralizada num quadrado, com fundo transparente.
 # Roda no Windows PowerShell 5.1 (powershell.exe).
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $raiz = Split-Path -Parent $PSScriptRoot
-$origem = Join-Path $raiz 'Guaxinim.jpg'
+$origem = Join-Path $raiz 'assets\guaxinim.png'
 $alvo = Join-Path $raiz 'icon.ico'
 if (Test-Path $alvo) { Write-Host "Ja existe: $alvo"; exit 0 }
+if (-not (Test-Path $origem)) { Write-Error "Gere antes o $origem (tools\make-guaxinim-png.ps1)"; exit 1 }
 
-$img = [System.Drawing.Image]::FromFile($origem)
+$img = New-Object System.Drawing.Bitmap($origem)
 try {
-    # Recorte quadrado (largura x largura) a partir do topo, pegando o rosto
-    $lado = [Math]::Min($img.Width, $img.Height)
-    $y = [int]($img.Height * 0.05)
-    if ($y + $lado -gt $img.Height) { $y = 0 }
-
+    # So a cabeca: os 62% de cima do recorte, num quadrado centralizado.
+    $alturaCabeca = [int]($img.Height * 0.62)
+    $lado = [Math]::Max($alturaCabeca, $img.Width)
     $quadrado = New-Object System.Drawing.Bitmap($lado, $lado)
     $g = [System.Drawing.Graphics]::FromImage($quadrado)
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $g.DrawImage($img,
-        (New-Object System.Drawing.Rectangle(0, 0, $lado, $lado)),
-        (New-Object System.Drawing.Rectangle(0, $y, $lado, $lado)),
+        (New-Object System.Drawing.Rectangle(([int](($lado - $img.Width) / 2)), 0, $img.Width, $alturaCabeca)),
+        (New-Object System.Drawing.Rectangle(0, 0, $img.Width, $alturaCabeca)),
         [System.Drawing.GraphicsUnit]::Pixel)
     $g.Dispose()
 

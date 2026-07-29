@@ -23,6 +23,15 @@ namespace AutoInstall
 
         public static ResultadoExec Rodar(string exe, string args, Encoding enc, Action<string> aoReceberLinha)
         {
+            return Rodar(exe, args, enc, aoReceberLinha, null);
+        }
+
+        // "controle" so deve ser passado para processos que podem ser
+        // encerrados a qualquer momento sem estragar nada (consultas, vigias).
+        // Instaladores rodam sem ele: sao sempre concluidos.
+        public static ResultadoExec Rodar(string exe, string args, Encoding enc,
+            Action<string> aoReceberLinha, ControleExecucao controle)
+        {
             var r = new ResultadoExec();
             var sbSaida = new StringBuilder();
             var sbErro = new StringBuilder();
@@ -56,9 +65,11 @@ namespace AutoInstall
                         if (e.Data != null) sbErro.AppendLine(e.Data);
                     };
                     p.Start();
+                    if (controle != null) controle.Registrar(p);
                     p.BeginOutputReadLine();
                     p.BeginErrorReadLine();
                     p.WaitForExit();
+                    if (controle != null) controle.Remover(p);
                     r.Codigo = p.ExitCode;
                 }
             }

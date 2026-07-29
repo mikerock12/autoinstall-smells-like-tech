@@ -1,27 +1,26 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
-using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace AutoInstall
 {
-    // Janela unica do programa. O rodape (credito + site) fica fixo do inicio
-    // ao fim; a area central troca entre splash, progresso, reinicio e final.
+    // Janela do programa. O rodape (credito + site) fica fixo do inicio ao fim;
+    // a area central troca entre progresso, reinicio e tela final. A abertura
+    // com o Guaxinim recortado acontece antes, em SplashGuaxinim.
     public class MainForm : Form
     {
         readonly bool retomada;
         readonly bool preview;
 
         Estado estado;
+        ControleExecucao controle;
+        bool jaInterrompeu;
         Panel conteudo;
-        FadeImagem splash;
         TelaProgresso telaProg;
         TelaReiniciar telaReiniciar;
         TelaFinal telaFinal;
-        Image guaxinim;
 
         public MainForm(bool retomada, bool preview)
         {
@@ -34,9 +33,8 @@ namespace AutoInstall
             ClientSize = new Size(920, 660);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Tema.Fundo;
-            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-
-            guaxinim = CarregarGuaxinim();
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch { }
 
             // Rodape permanente: credito + site clicavel
             var rodape = new Panel();
@@ -76,33 +74,17 @@ namespace AutoInstall
             Controls.Add(conteudo);
             conteudo.BringToFront();
 
-            splash = new FadeImagem();
-            splash.Imagem = guaxinim;
+            controle = new ControleExecucao();
 
             telaProg = new TelaProgresso();
+            telaProg.Ligar(controle);
             telaReiniciar = new TelaReiniciar();
             telaReiniciar.AoReiniciar += delegate { ReiniciarAgora(); };
-            telaFinal = new TelaFinal(guaxinim);
+            telaFinal = new TelaFinal(Recursos.CarregarGuaxinim());
             telaFinal.AoFechar += delegate { Close(); };
+            telaFinal.AoRefazer += delegate { Refazer(); };
 
             Shown += delegate { Fluxo(); };
-        }
-
-        static Image CarregarGuaxinim()
-        {
-            try
-            {
-                var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("Guaxinim.jpg");
-                if (st != null) return Image.FromStream(st);
-            }
-            catch { }
-            try
-            {
-                string p = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "Guaxinim.jpg");
-                if (File.Exists(p)) return Image.FromFile(p);
-            }
-            catch { }
-            return null;
         }
 
         void Mostrar(Control tela)
@@ -112,42 +94,14 @@ namespace AutoInstall
             conteudo.Controls.Add(tela);
         }
 
-        // Splash do Guaxinim: fade in, pausa e fade out (5 s cada fade na
-        // primeira execucao; rapido nas retomadas pos-reinicio).
-        Task AnimarSplash(int entradaMs, int pausaMs, int saidaMs)
+        void MostrarFinal()
         {
-            var tcs = new TaskCompletionSource<bool>();
-            Mostrar(splash);
-            var cronometro = Stopwatch.StartNew();
-            long total = entradaMs + pausaMs + saidaMs;
-            var t = new Timer();
-            t.Interval = 30;
-            t.Tick += delegate
-            {
-                long ms = cronometro.ElapsedMilliseconds;
-                if (ms >= total)
-                {
-                    t.Stop();
-                    t.Dispose();
-                    splash.Alfa = 0f;
-                    tcs.TrySetResult(true);
-                    return;
-                }
-                float a;
-                if (ms < entradaMs) a = ms / (float)entradaMs;
-                else if (ms < entradaMs + pausaMs) a = 1f;
-                else a = 1f - (ms - entradaMs - pausaMs) / (float)saidaMs;
-                splash.Alfa = a;
-            };
-            t.Start();
-            return tcs.Task;
+            Mostrar(telaFinal);
+            telaFinal.Preencher(estado);
         }
 
         async void Fluxo()
         {
-            if (retomada) await AnimarSplash(900, 400, 700);
-            else await AnimarSplash(5000, 900, 5000);
-
             estado = Estado.Carregar();
             Mostrar(telaProg);
 
@@ -168,17 +122,70 @@ namespace AutoInstall
             }
         }
 
+        // Refazer tudo na mesma maquina: descarta o estado salvo e recomeca.
+        async void Refazer()
+        {
+            if (preview)
+            {
+                MessageBox.Show(this,
+                    "Modo prévia: nada é executado de verdade. Abra o programa sem --preview " +
+                    "para refazer o processo nesta máquina.",
+                    "AutoInstall — prévia", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            jaInterrompeu = false;
+            Estado.Apagar();
+            TarefaInicio.Remover();
+            controle.Reiniciar();
+            estado = Estado.Carregar();
+            telaProg.Limpar();
+            Mostrar(telaProg);
+            telaProg.Log("Refazendo todas as etapas do zero.");
+            try
+            {
+                await FluxoReal();
+            }
+            catch (Exception ex)
+            {
+                telaProg.Log("ERRO INESPERADO: " + ex.Message);
+            }
+        }
+
+        // Ponto de checagem: segura enquanto pausado e encerra se o tecnico
+        // mandou parar. Roda fora da thread da interface (Prosseguir bloqueia).
+        async Task<bool> Ponto()
+        {
+            bool seguir = await Task.Run(delegate { return controle.Prosseguir(); });
+            if (seguir) return true;
+            await Interromper();
+            return false;
+        }
+
         async Task FluxoReal()
         {
             Action<string> log = telaProg.Log;
 
-            // Ja terminou tudo em execucao anterior? So mostra o relatorio.
+            // Ja terminou tudo em execucao anterior? So mostra o relatorio -
+            // e de la que se refaz o processo, pelo botao da tela final.
             if (estado.Fase == "concluido")
             {
-                Mostrar(telaFinal);
-                telaFinal.Preencher(estado);
+                MostrarFinal();
                 return;
             }
+
+            // Escolha do Office: uma unica vez, antes do processo longo.
+            if (string.IsNullOrEmpty(estado.EdicaoOffice))
+            {
+                using (var dlg = new EscolhaOffice())
+                {
+                    dlg.ShowDialog(this);
+                    estado.EdicaoOffice = dlg.Edicao;
+                }
+                estado.Salvar();
+                log("Office escolhido: " + InstaladorOffice.NomeEdicao(estado.EdicaoOffice) + ".");
+            }
+
+            if (!await Ponto()) return;
 
             // 1) Energia no maximo (uma unica vez)
             if (!estado.EnergiaConfigurada)
@@ -197,23 +204,44 @@ namespace AutoInstall
             if (estado.Fase == "updates")
             {
                 bool continuar = await FaseUpdates(log);
-                if (!continuar) return;   // vai reiniciar; o resto fica para depois
+                if (!continuar) return;   // vai reiniciar, ou foi interrompido
             }
 
             // 3) Programas essenciais
-            if (estado.Fase == "apps") await FaseApps(log);
+            if (estado.Fase == "apps")
+            {
+                if (!await Ponto()) return;
+                await FaseApps(log);
+                if (controle.Parando) return;
+            }
 
-            // 4) Atualizacao geral de aplicativos (ate zerar)
-            if (estado.Fase == "upgrade") await FaseUpgrade(log);
+            // 4) Office
+            if (estado.Fase == "office")
+            {
+                if (!await Ponto()) return;
+                await FaseOffice(log);
+                if (controle.Parando) return;
+            }
 
-            // 5) Energia recomendada + relatorio final
+            // 5) Loja + atualizacao geral de aplicativos
+            if (estado.Fase == "upgrade")
+            {
+                if (!await Ponto()) return;
+                await FaseUpgrade(log);
+                if (controle.Parando) return;
+            }
+
+            // 6) Energia recomendada + relatorio final
+            if (!await Ponto()) return;
             await Finalizar(log);
         }
 
         // Retorna true para seguir para a proxima fase; false quando o
-        // computador vai reiniciar (a tarefa agendada retoma depois).
+        // computador vai reiniciar ou o processo foi interrompido.
         async Task<bool> FaseUpdates(Action<string> log)
         {
+            if (!await Ponto()) return false;
+
             var atualizador = new AtualizadorWindows();
             int rodada = estado.Rodadas.Count + 1;
             telaProg.Fase(string.Format("Windows Update — verificação {0}", rodada));
@@ -266,6 +294,8 @@ namespace AutoInstall
             foreach (var item in busca.Itens)
                 log((item.Driver ? "[driver] " : item.Opcional ? "[opcional] " : "") + item.Titulo);
 
+            if (!await Ponto()) return false;
+
             // Download com percentual real
             telaProg.Etapa(string.Format("Baixando {0} atualização(ões)...", busca.Total));
             atualizador.AoProgredirDownload = delegate(int geral, int idx, int pctItem, string titulo)
@@ -273,11 +303,14 @@ namespace AutoInstall
                 telaProg.Progresso(geral, string.Format("Baixando {0} de {1} ({2}% desta) — {3}",
                     idx, busca.Total, pctItem, Curto(titulo)));
             };
-            await Task.Run(delegate { atualizador.Baixar(busca); });
+            await Task.Run(delegate { atualizador.Baixar(busca, controle); });
+            if (controle.Parando) { await Interromper(); return false; }
             telaProg.Progresso(100, "Download concluído.");
             log("Download de todas as atualizações concluído.");
 
-            // Instalacao com percentual real
+            if (!await Ponto()) return false;
+
+            // Instalacao com percentual real (nunca abortada no meio)
             telaProg.Etapa(string.Format("Instalando {0} atualização(ões)...", busca.Total));
             telaProg.Progresso(0, "");
             atualizador.AoProgredirInstalacao = delegate(int geral, int idx, int pctItem, string titulo)
@@ -298,6 +331,8 @@ namespace AutoInstall
             estado.Reinicios++;
             estado.Salvar();
 
+            if (controle.Parando) { await Interromper(); return false; }
+
             TarefaInicio.Criar(log);
             Mostrar(telaReiniciar);
             telaReiniciar.Iniciar();
@@ -309,7 +344,7 @@ namespace AutoInstall
             var lista = InstaladorApps.Programas;
             telaProg.Fase("Instalação de programas");
             telaProg.Contagens(string.Format(
-                "{0} programas: Chrome · Acrobat Reader · WinRAR · K-Lite (codecs + player) · Office 365",
+                "{0} programas: Chrome · Acrobat Reader · WinRAR · K-Lite (codecs + player)",
                 lista.Length));
             telaProg.Progresso(0, "");
 
@@ -319,6 +354,7 @@ namespace AutoInstall
 
             for (int i = 0; i < lista.Length; i++)
             {
+                if (!await Ponto()) return;
                 var alvo = lista[i];
                 int indice = i;
                 telaProg.Etapa(string.Format("Instalando {0} de {1}: {2}", i + 1, lista.Length, alvo.Nome));
@@ -350,8 +386,32 @@ namespace AutoInstall
             }
 
             telaProg.Progresso(100, "Programas concluídos.");
+            estado.Fase = "office";
+            estado.Salvar();
+        }
+
+        async Task FaseOffice(Action<string> log)
+        {
+            string edicao = string.IsNullOrEmpty(estado.EdicaoOffice)
+                ? InstaladorOffice.EDICAO_CONSUMIDOR : estado.EdicaoOffice;
+
+            telaProg.Fase("Instalação do Office");
+            telaProg.Contagens(InstaladorOffice.NomeEdicao(edicao) + "   ·   português (pt-BR)");
+            telaProg.Etapa("Instalando o Office direto da Microsoft, sem interação...");
+            telaProg.Progresso(0, "");
+
+            var instalador = new InstaladorOffice();
+            AppInstalado app = await Task.Run(delegate
+            {
+                return instalador.Instalar(edicao, log, delegate(int pct, string detalhe)
+                {
+                    telaProg.Progresso(pct, detalhe);
+                });
+            });
+            estado.Apps.Add(app);
             estado.Fase = "upgrade";
             estado.Salvar();
+            telaProg.Progresso(100, app.Status);
         }
 
         async Task FaseUpgrade(Action<string> log)
@@ -369,13 +429,16 @@ namespace AutoInstall
             {
                 telaProg.Progresso(pct, detalhe);
             };
-            bool lojaOk = await Task.Run(delegate { return loja.Atualizar(estado); });
+            bool lojaOk = await Task.Run(delegate { return loja.Atualizar(estado, controle); });
             if (!lojaOk)
             {
                 log("Não consegui acionar a atualização automática da Loja; abrindo a página " +
                     "de atualizações da Microsoft Store para acompanhar manualmente.");
-                try { Process.Start("ms-windows-store://downloadsandupdates"); } catch { }
+                try { Process.Start("ms-windows-store://downloadsandupdates"); }
+                catch { }
             }
+
+            if (!await Ponto()) return;
 
             // 2) Programas comuns via winget, em passadas até zerar
             telaProg.Etapa("Rodando a atualização geral do winget (repete até não sobrar nada)...");
@@ -390,7 +453,7 @@ namespace AutoInstall
                     instalador.AtualizarTudo(estado, log, delegate(int pct)
                     {
                         telaProg.Progresso(pct, null);
-                    });
+                    }, controle);
                 });
             }
             else
@@ -411,9 +474,25 @@ namespace AutoInstall
             TarefaInicio.Remover();
             estado.Fase = "concluido";
             estado.Salvar();
+            MostrarFinal();
+        }
 
-            Mostrar(telaFinal);
-            telaFinal.Preencher(estado);
+        // Parada pedida pelo tecnico: devolve a maquina a um estado saudavel
+        // (energia recomendada, sem tarefa de retomada) e mostra o que deu
+        // tempo de fazer.
+        async Task Interromper()
+        {
+            if (jaInterrompeu) return;
+            jaInterrompeu = true;
+            telaProg.Fase("Interrompendo");
+            telaProg.Etapa("Restaurando o plano de energia e encerrando com segurança...");
+            estado.Interrompido = true;
+            estado.Salvar();
+            await Task.Run(delegate { Energia.Restaurar(estado, telaProg.Log); });
+            TarefaInicio.Remover();
+            estado.Fase = "concluido";
+            estado.Salvar();
+            MostrarFinal();
         }
 
         void ReiniciarAgora()
@@ -464,12 +543,13 @@ namespace AutoInstall
             fake.Apps.Add(AppFake("Adobe Acrobat Reader", "Adobe.Acrobat.Reader.64-bit", "25.001.20521"));
             fake.Apps.Add(AppFake("WinRAR", "RARLab.WinRAR", "7.12"));
             fake.Apps.Add(AppFake("K-Lite Codec Pack (codecs + player MPC-HC)", "CodecGuide.K-LiteCodecPack.Standard", "18.9.5"));
-            fake.Apps.Add(AppFake("Microsoft 365 (Office)", "Microsoft.Office", "16.0.18827.20202"));
+            fake.Apps.Add(AppFake("Microsoft Office 365 — Microsoft 365 (Personal/Família)", "O365HomePremRetail", "16.0.18827.20202"));
+            fake.Upgrades.Add("Microsoft Store: 10 de 10 app(s) atualizado(s).");
             fake.Upgrades.Add("Passada 1 concluída (código 0).");
             fake.Upgrades.Add("Verificação final: nenhum aplicativo pendente.");
 
-            Mostrar(telaFinal);
-            telaFinal.Preencher(fake);
+            estado = fake;
+            MostrarFinal();
         }
 
         static AppInstalado AppFake(string nome, string id, string versao)

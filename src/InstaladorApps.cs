@@ -27,7 +27,9 @@ namespace AutoInstall
             // K-Lite Standard = codecs de audio/video atualizados + MPC-HC,
             // player leve e recomendado (melhor que os que vem com o Windows)
             new ProgramaAlvo("K-Lite Codec Pack (codecs + player MPC-HC)", "CodecGuide.K-LiteCodecPack.Standard"),
-            new ProgramaAlvo("Microsoft 365 (Office)", "Microsoft.Office"),
+            // O Office NAO entra aqui: o pacote Microsoft.Office do winget so
+            // baixa o motor do Office Deployment Tool e sai sem instalar nada.
+            // Ele tem instalador proprio em InstaladorOffice.cs.
         };
 
         const string ARGS_COMUNS = " --accept-package-agreements --accept-source-agreements --disable-interactivity";
@@ -165,12 +167,14 @@ namespace AutoInstall
         // atualizacao nenhuma (max. 5). Os apps UWP da Loja sao cobertos pela
         // etapa da LojaMicrosoft (AppInstallManager); aqui ficam os programas
         // de desktop.
-        public void AtualizarTudo(Estado estado, Action<string> log, Action<int> progresso)
+        public void AtualizarTudo(Estado estado, Action<string> log, Action<int> progresso,
+            ControleExecucao controle)
         {
             if (winget == null) return;
 
             for (int passada = 1; passada <= 5; passada++)
             {
+                if (controle != null && !controle.Prosseguir()) return;
                 log(string.Format("Passada {0}: winget upgrade --all...", passada));
                 var parse = new ParseWinget(log, progresso);
                 var r = Executor.Rodar(winget,
@@ -179,9 +183,10 @@ namespace AutoInstall
                 estado.Upgrades.Add(string.Format("Passada {0} concluída (código {1}).", passada, r.Codigo));
                 estado.Salvar();
 
+                if (controle != null && !controle.Prosseguir()) return;
                 var pendentes = Executor.Rodar(winget,
                     "upgrade --include-unknown --accept-source-agreements --disable-interactivity",
-                    Encoding.UTF8, null);
+                    Encoding.UTF8, null, controle);
                 if (!TemTabela(pendentes.Saida))
                 {
                     log("Nenhuma atualização de aplicativo pendente — tudo em dia.");

@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Windows.Forms;
 
 namespace AutoInstall
@@ -30,6 +31,38 @@ namespace AutoInstall
         public static void AbrirInstagram()
         {
             try { System.Diagnostics.Process.Start(INSTA_URL); } catch { }
+        }
+    }
+
+    // O Guaxinim recortado (PNG com transparencia), embutido no executavel.
+    // E gerado do Guaxinim.jpg por tools\make-guaxinim-png.ps1.
+    public static class Recursos
+    {
+        static Image guaxinim;
+        static bool tentou;
+
+        public static Image CarregarGuaxinim()
+        {
+            if (tentou) return guaxinim;
+            tentou = true;
+            try
+            {
+                var asm = System.Reflection.Assembly.GetExecutingAssembly();
+                Stream st = asm.GetManifestResourceStream("guaxinim.png");
+                if (st != null) { guaxinim = Image.FromStream(st); return guaxinim; }
+            }
+            catch { }
+            try
+            {
+                string pasta = Path.GetDirectoryName(Application.ExecutablePath);
+                foreach (string nome in new string[] { "guaxinim.png", @"assets\guaxinim.png", "Guaxinim.jpg" })
+                {
+                    string p = Path.Combine(pasta, nome);
+                    if (File.Exists(p)) { guaxinim = Image.FromFile(p); return guaxinim; }
+                }
+            }
+            catch { }
+            return null;
         }
     }
 

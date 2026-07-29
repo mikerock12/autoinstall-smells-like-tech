@@ -16,10 +16,31 @@ namespace AutoInstall
         readonly Label lblDetalhe;
         readonly BarraProgresso barra;
         readonly TextBox caixaLog;
+        readonly Button btnPausar;
+        readonly Button btnParar;
+        readonly Label lblAviso;
+        ControleExecucao controle;
 
         public TelaProgresso()
         {
             BackColor = Tema.Fundo;
+
+            btnPausar = BotaoControle("Pausar", 596);
+            btnPausar.Click += delegate { AlternarPausa(); };
+            Controls.Add(btnPausar);
+
+            btnParar = BotaoControle("Parar", 736);
+            btnParar.Click += delegate { PedirParada(); };
+            Controls.Add(btnParar);
+
+            lblAviso = new Label();
+            lblAviso.Font = new Font("Segoe UI", 8.5f);
+            lblAviso.ForeColor = Tema.TextoSuave;
+            lblAviso.TextAlign = ContentAlignment.MiddleLeft;
+            lblAviso.SetBounds(60, 552, 520, 32);
+            lblAviso.Text = "A pausa e a parada valem ao fim do item atual: uma instalação\n" +
+                            "em andamento nunca é cortada no meio.";
+            Controls.Add(lblAviso);
 
             lblFase = new Label();
             lblFase.Font = new Font("Segoe UI Semibold", 17f);
@@ -59,8 +80,73 @@ namespace AutoInstall
             caixaLog.BackColor = Tema.FundoEscuro;
             caixaLog.ForeColor = Color.FromArgb(185, 190, 196);
             caixaLog.Font = new Font("Consolas", 9f);
-            caixaLog.SetBounds(60, 222, 800, 358);
+            caixaLog.SetBounds(60, 222, 800, 318);
             Controls.Add(caixaLog);
+        }
+
+        static Button BotaoControle(string texto, int x)
+        {
+            var b = new Button();
+            b.Text = texto;
+            b.Font = new Font("Segoe UI Semibold", 10f);
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderColor = Tema.Borda;
+            b.BackColor = Color.FromArgb(28, 31, 38);
+            b.ForeColor = Tema.Texto;
+            b.SetBounds(x, 552, 124, 32);
+            b.Cursor = Cursors.Hand;
+            return b;
+        }
+
+        public void Ligar(ControleExecucao c)
+        {
+            controle = c;
+            controle.AoMudar += delegate { NoUi(AtualizarBotoes); };
+        }
+
+        void AlternarPausa()
+        {
+            if (controle == null) return;
+            if (controle.Pausado) { controle.Continuar(); Log("Processo retomado."); }
+            else { controle.Pausar(); Log("Pausa solicitada — vou parar ao fim do item atual."); }
+            AtualizarBotoes();
+        }
+
+        void PedirParada()
+        {
+            if (controle == null || controle.Parando) return;
+            var r = MessageBox.Show(
+                "Parar o processo agora?\n\n" +
+                "O item que estiver instalando será concluído com segurança e o " +
+                "programa vai para a tela final, restaurando o plano de energia.\n\n" +
+                "Você pode refazer tudo depois pelo botão da tela final.",
+                "AutoInstall — parar", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (r != DialogResult.Yes) return;
+            controle.Parar();
+            Log("Parada solicitada — encerrando assim que o item atual terminar.");
+            AtualizarBotoes();
+        }
+
+        void AtualizarBotoes()
+        {
+            if (controle == null) return;
+            if (controle.Parando)
+            {
+                btnPausar.Enabled = false;
+                btnParar.Enabled = false;
+                btnParar.Text = "Parando...";
+                lblAviso.ForeColor = Tema.LaranjaClaro;
+                lblAviso.Text = "PARANDO — encerro assim que o item atual terminar\ncom segurança.";
+                return;
+            }
+            btnPausar.Text = controle.Pausado ? "Continuar" : "Pausar";
+            btnPausar.BackColor = controle.Pausado ? Tema.Laranja : Color.FromArgb(28, 31, 38);
+            btnPausar.ForeColor = controle.Pausado ? Color.FromArgb(24, 16, 6) : Tema.Texto;
+            lblAviso.ForeColor = controle.Pausado ? Tema.LaranjaClaro : Tema.TextoSuave;
+            lblAviso.Text = controle.Pausado
+                ? "PAUSADO no fim do item atual. Clique em Continuar para\nretomar de onde parou."
+                : "A pausa e a parada valem ao fim do item atual: uma instalação\nem andamento nunca é cortada no meio.";
         }
 
         void NoUi(Action acao)
@@ -91,6 +177,18 @@ namespace AutoInstall
             {
                 barra.Valor = pct;
                 if (detalhe != null) lblDetalhe.Text = detalhe;
+            });
+        }
+
+        public void Limpar()
+        {
+            NoUi(delegate
+            {
+                caixaLog.Clear();
+                barra.Valor = 0;
+                lblDetalhe.Text = "";
+                lblContagens.Text = "";
+                AtualizarBotoes();
             });
         }
 
@@ -196,9 +294,11 @@ namespace AutoInstall
     public class TelaFinal : Panel
     {
         public event Action AoFechar;
+        public event Action AoRefazer;
 
         readonly FadeImagem imagem;
         readonly TextBox caixaRelatorio;
+        readonly Label lblTitulo;
 
         public TelaFinal(Image guaxinim)
         {
@@ -209,7 +309,7 @@ namespace AutoInstall
             imagem.SetBounds(0, 8, 920, 200);
             Controls.Add(imagem);
 
-            var lblTitulo = new Label();
+            lblTitulo = new Label();
             lblTitulo.Text = "Tudo pronto!";
             lblTitulo.Font = new Font("Segoe UI Semibold", 17f);
             lblTitulo.ForeColor = Tema.Laranja;
@@ -274,10 +374,39 @@ namespace AutoInstall
                 if (h != null) h();
             };
             Controls.Add(btnFechar);
+
+            // Discreto de proposito: serve para o tecnico rodar tudo de novo
+            // na mesma maquina (conferir a Loja, reinstalar algo que falhou),
+            // sem competir com o botao Fechar.
+            var btnRefazer = new LinkLabel();
+            btnRefazer.Text = "Refazer todas as etapas";
+            btnRefazer.Font = new Font("Segoe UI", 8.75f);
+            btnRefazer.LinkColor = Tema.TextoSuave;
+            btnRefazer.ActiveLinkColor = Tema.LaranjaClaro;
+            btnRefazer.VisitedLinkColor = Tema.TextoSuave;
+            btnRefazer.TextAlign = ContentAlignment.MiddleLeft;
+            btnRefazer.SetBounds(60, 568, 200, 20);
+            btnRefazer.LinkClicked += delegate { ConfirmarRefazer(); };
+            Controls.Add(btnRefazer);
+        }
+
+        void ConfirmarRefazer()
+        {
+            var r = MessageBox.Show(
+                "Refazer todas as etapas nesta máquina?\n\n" +
+                "O relatório atual é descartado e o processo recomeça do zero: " +
+                "energia, Windows Update (com reinicializações), programas e " +
+                "atualização dos aplicativos da Microsoft Store.",
+                "AutoInstall — refazer tudo", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (r != DialogResult.Yes) return;
+            var h = AoRefazer;
+            if (h != null) h();
         }
 
         public void Preencher(Estado e)
         {
+            lblTitulo.Text = e.Interrompido ? "Processo interrompido" : "Tudo pronto!";
             caixaRelatorio.Text = MontarRelatorio(e);
             caixaRelatorio.Select(0, 0);
 
@@ -300,6 +429,9 @@ namespace AutoInstall
             sb.AppendLine("RESUMO DO PÓS-FORMATAÇÃO — SMELLS LIKE TECH INFORMÁTICA");
             if (!string.IsNullOrEmpty(e.InicioEm))
                 sb.AppendLine(string.Format("Início: {0}   ·   Reinicializações: {1}", e.InicioEm, e.Reinicios));
+            if (e.Interrompido)
+                sb.AppendLine("ATENÇÃO: o processo foi PARADO pelo técnico antes do fim — " +
+                              "o que está abaixo é só o que deu tempo de concluir.");
             sb.AppendLine();
 
             sb.AppendLine("== ATUALIZAÇÕES DO WINDOWS ==");

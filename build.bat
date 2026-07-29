@@ -18,7 +18,16 @@ if not exist lib\Interop.WUApiLib.dll (
   exit /b 1
 )
 
-rem Icone (gerado do Guaxinim.jpg)
+rem Guaxinim recortado (fundo transparente), usado na abertura e na tela final
+if not exist assets\guaxinim.png (
+  "%PS%" -NoProfile -ExecutionPolicy Bypass -File tools\make-guaxinim-png.ps1
+)
+if not exist assets\guaxinim.png (
+  echo *** FALHA: assets\guaxinim.png nao foi gerado ***
+  exit /b 1
+)
+
+rem Icone (gerado do recorte)
 if not exist icon.ico (
   "%PS%" -NoProfile -ExecutionPolicy Bypass -File tools\make-icon.ps1
 )
@@ -28,7 +37,7 @@ if not exist bin mkdir bin
 "%CSC%" /nologo /target:winexe /codepage:65001 /out:bin\AutoInstall.exe ^
   /win32manifest:app.manifest ^
   /win32icon:icon.ico ^
-  /resource:Guaxinim.jpg,Guaxinim.jpg ^
+  /resource:assets\guaxinim.png,guaxinim.png ^
   /resource:tools\loja-update.ps1,loja-update.ps1 ^
   /link:lib\Interop.WUApiLib.dll ^
   /r:System.Core.dll ^

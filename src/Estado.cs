@@ -28,6 +28,8 @@ namespace AutoInstall
         public string Fase { get; set; }
         public int Reinicios { get; set; }
         public bool EnergiaConfigurada { get; set; }
+        public bool Interrompido { get; set; }
+        public string EdicaoOffice { get; set; }   // consumidor | empresarial | nenhuma
         public string PlanoUltra { get; set; }      // GUID do plano temporario (para remover no final)
         public string PlanoOriginal { get; set; }   // GUID do plano ativo antes de tudo
         public List<RodadaUpdates> Rodadas { get; set; }
@@ -86,6 +88,14 @@ namespace AutoInstall
                 Directory.CreateDirectory(Pasta);
                 File.WriteAllText(Arquivo, new JavaScriptSerializer().Serialize(this));
             }
+            catch { }
+        }
+
+        // "Refazer todas as etapas": apaga o estado salvo para o processo
+        // recomecar do zero na proxima execucao.
+        public static void Apagar()
+        {
+            try { if (File.Exists(Arquivo)) File.Delete(Arquivo); }
             catch { }
         }
 

@@ -21,7 +21,7 @@ namespace AutoInstall
         public bool Terminou;
         public string Falha;
 
-        public bool Atualizar(Estado estado)
+        public bool Atualizar(Estado estado, ControleExecucao controle)
         {
             string script = CarregarScript();
             if (script == null)
@@ -38,11 +38,21 @@ namespace AutoInstall
                 return false;
             }
 
+            // O script so ACOMPANHA a fila da Loja; encerra-lo ao parar nao
+            // interrompe nada - a Loja segue instalando por conta propria.
             string ps = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe");
             var r = Executor.Rodar(ps,
                 "-NoProfile -ExecutionPolicy Bypass -File \"" + caminho + "\"",
-                null, TratarLinha);
+                null, TratarLinha, controle);
             try { File.Delete(caminho); } catch { }
+
+            if (controle != null && controle.Parando)
+            {
+                Log("Loja: acompanhamento encerrado a pedido (a Loja continua em segundo plano).");
+                estado.Upgrades.Add("Microsoft Store: acompanhamento interrompido pelo técnico.");
+                estado.Salvar();
+                return true;
+            }
 
             if (Falha != null)
             {

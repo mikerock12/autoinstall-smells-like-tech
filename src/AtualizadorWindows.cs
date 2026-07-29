@@ -103,7 +103,10 @@ namespace AutoInstall
             return rb;
         }
 
-        public void Baixar(ResultadoBusca busca)
+        // Download pode ser abortado com seguranca (o que ja veio fica em cache
+        // e o proximo ciclo aproveita). A INSTALACAO nunca e abortada: parar no
+        // meio de uma atualizacao e a receita para um Windows quebrado.
+        public void Baixar(ResultadoBusca busca, ControleExecucao controle)
         {
             IUpdateSession3 s = ObterSessao();
             IUpdateDownloader dl = s.CreateUpdateDownloader();
@@ -113,8 +116,16 @@ namespace AutoInstall
             {
                 IDownloadJob job = dl.BeginDownload(
                     new CbDownloadProgresso(this, busca), new CbDownloadFim(fim), null);
-                fim.WaitOne();
-                dl.EndDownload(job);
+                while (!fim.WaitOne(500))
+                {
+                    if (controle == null || !controle.Parando) continue;
+                    try { job.RequestAbort(); }
+                    catch { }
+                    fim.WaitOne(20000);
+                    break;
+                }
+                try { dl.EndDownload(job); }
+                catch { }
             }
         }
 
