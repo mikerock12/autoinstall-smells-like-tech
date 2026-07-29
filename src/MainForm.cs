@@ -173,18 +173,6 @@ namespace AutoInstall
                 return;
             }
 
-            // Escolha do Office: uma unica vez, antes do processo longo.
-            if (string.IsNullOrEmpty(estado.EdicaoOffice))
-            {
-                using (var dlg = new EscolhaOffice())
-                {
-                    dlg.ShowDialog(this);
-                    estado.EdicaoOffice = dlg.Edicao;
-                }
-                estado.Salvar();
-                log("Office escolhido: " + InstaladorOffice.NomeEdicao(estado.EdicaoOffice) + ".");
-            }
-
             if (!await Ponto()) return;
 
             // 1) Energia no maximo (uma unica vez)
@@ -392,18 +380,15 @@ namespace AutoInstall
 
         async Task FaseOffice(Action<string> log)
         {
-            string edicao = string.IsNullOrEmpty(estado.EdicaoOffice)
-                ? InstaladorOffice.EDICAO_CONSUMIDOR : estado.EdicaoOffice;
-
             telaProg.Fase("Instalação do Office");
-            telaProg.Contagens(InstaladorOffice.NomeEdicao(edicao) + "   ·   português (pt-BR)");
+            telaProg.Contagens(InstaladorOffice.NOME + "   ·   português (pt-BR)");
             telaProg.Etapa("Instalando o Office direto da Microsoft, sem interação...");
             telaProg.Progresso(0, "");
 
             var instalador = new InstaladorOffice();
             AppInstalado app = await Task.Run(delegate
             {
-                return instalador.Instalar(edicao, log, delegate(int pct, string detalhe)
+                return instalador.Instalar(log, delegate(int pct, string detalhe)
                 {
                     telaProg.Progresso(pct, detalhe);
                 });
@@ -543,7 +528,8 @@ namespace AutoInstall
             fake.Apps.Add(AppFake("Adobe Acrobat Reader", "Adobe.Acrobat.Reader.64-bit", "25.001.20521"));
             fake.Apps.Add(AppFake("WinRAR", "RARLab.WinRAR", "7.12"));
             fake.Apps.Add(AppFake("K-Lite Codec Pack (codecs + player MPC-HC)", "CodecGuide.K-LiteCodecPack.Standard", "18.9.5"));
-            fake.Apps.Add(AppFake("Microsoft Office 365 — Microsoft 365 (Personal/Família)", "O365HomePremRetail", "16.0.18827.20202"));
+            fake.Apps.Add(AppFake("Microsoft Office 365 — " + InstaladorOffice.NOME,
+                InstaladorOffice.PRODUTO, "16.0.18827.20202"));
             fake.Upgrades.Add("Microsoft Store: 10 de 10 app(s) atualizado(s).");
             fake.Upgrades.Add("Passada 1 concluída (código 0).");
             fake.Upgrades.Add("Verificação final: nenhum aplicativo pendente.");

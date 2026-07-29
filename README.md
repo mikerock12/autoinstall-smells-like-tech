@@ -31,12 +31,10 @@ Criado por Maicon Nunes · [www.smellsliketech.com.br](https://www.smellsliketec
    WinRAR e K-Lite Codec Pack Standard (codecs de áudio/vídeo atualizados +
    player leve MPC-HC). Se o winget ainda não existir (comum após formatar),
    o programa baixa e registra o App Installer sozinho.
-6. **Office 365** — instalado pelo **Office Deployment Tool oficial** com XML
-   de configuração explícito (pt-BR, 64 bits), e no fim **conferido no
-   registro** do Click-to-Run. No começo da execução o programa pergunta uma
-   única vez qual edição instalar — Personal/Família (padrão), Apps for
-   enterprise, ou nenhuma — porque a edição errada instala mas não ativa.
-   Sem resposta em 30 s, segue no padrão.
+6. **Office 365** — sempre o **Microsoft 365 Personal/Família**, em português
+   (pt-BR), instalado pelo **Office Deployment Tool oficial** com XML de
+   configuração explícito e, no fim, **conferido no registro** do Click-to-Run.
+   Sem perguntas: se a máquina já tiver Office instalado, ele é mantido.
 
    > Por que não pelo winget: o pacote `Microsoft.Office` baixa o
    > `setup.exe` do ODT, que **sem um XML não instala nada** — e ainda assim
@@ -78,21 +76,16 @@ de Visual Studio**. Na primeira compilação, o script gera automaticamente:
 
 - `lib\Interop.WUApiLib.dll` — interop da API COM do Windows Update, criada a
   partir do `wuapi.dll` do próprio sistema (`tools\make-interop.ps1`);
-- `assets\guaxinim.png` — o Guaxinim recortado do `Guaxinim.jpg` com fundo
-  transparente (`tools\make-guaxinim-png.ps1`);
-- `icon.ico` — ícone gerado do recorte (`tools\make-icon.ps1`).
+- `icon.ico` — ícone gerado do logo (`tools\make-icon.ps1`).
 
-### Sobre o recorte do Guaxinim
+### Logo
 
-O capuz preto sobre fundo escuro derruba qualquer recorte por limiar simples —
-medindo a foto, o capuz tem brilho mediano **15** e o fundo colado nele, **29**
-(o fundo é mais *claro* que o capuz), e a tonalidade também não separa os dois.
-Por isso `tools\make-guaxinim-png.ps1` combina: polígono traçado à mão para a
-silhueta do corpo, inundação por faixa de brilho para limpar o fundo restante,
-*matting* por luminância na região de pelo (é o que preserva bigodes e tufos
-das orelhas), remoção de ilhas soltas e dissolução das bordas que a moldura da
-foto corta. Alterou a arte? Apague `assets\guaxinim.png` e ajuste as constantes
-no topo do script (`POLIGONO`, `LINHA_PELO`, `BORDA_CORREDOR`).
+`assets\guaxinim.png` é o Guaxinim recortado com fundo transparente — arquivo
+versionado do projeto, usado na abertura e no topo da tela final. Para trocar
+a arte, substitua esse PNG (mantendo a transparência), **apague `icon.ico`** e
+compile: o ícone é refeito a partir dele. O gerador de ícone acha a cabeça
+sozinho pela transparência, então não depende das proporções do recorte.
+`Guaxinim.jpg` é a arte original, guardada só como referência.
 
 Saída: **`bin\AutoInstall.exe`** — arquivo único (imagem e interop embutidas),
 pronto para o pendrive. Requer administrador (manifesto).
@@ -129,7 +122,6 @@ Assinatura digital opcional: defina `SLT_CERT_SUBJECT` antes de rodar o build
 | `src/AtualizadorWindows.cs` | Windows Update via COM com progresso real |
 | `src/InstaladorApps.cs` | winget: bootstrap, instalação e upgrade geral |
 | `src/InstaladorOffice.cs` | Office pelo ODT oficial + conferência no registro |
-| `src/EscolhaOffice.cs` | Diálogo único da edição do Office (30 s de espera) |
 | `src/LojaMicrosoft.cs` | Apps da Store via API AppInstallManager |
 | `src/Energia.cs` | Planos de energia (powercfg) |
 | `src/TarefaInicio.cs` | Tarefa agendada de retomada (schtasks + RunOnce) |

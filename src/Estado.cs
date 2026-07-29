@@ -29,7 +29,6 @@ namespace AutoInstall
         public int Reinicios { get; set; }
         public bool EnergiaConfigurada { get; set; }
         public bool Interrompido { get; set; }
-        public string EdicaoOffice { get; set; }   // consumidor | empresarial | nenhuma
         public string PlanoUltra { get; set; }      // GUID do plano temporario (para remover no final)
         public string PlanoOriginal { get; set; }   // GUID do plano ativo antes de tudo
         public List<RodadaUpdates> Rodadas { get; set; }

@@ -1,5 +1,9 @@
-# Gera icon.ico a partir do recorte transparente (assets\guaxinim.png):
-# a cabeca do Guaxinim, centralizada num quadrado, com fundo transparente.
+# Gera icon.ico a partir do logo recortado (assets\guaxinim.png).
+#
+# O icone mostra so a cabeca do Guaxinim: em 16x16 o personagem inteiro vira
+# uma mancha. A cabeca e localizada pela propria transparencia do PNG - acha a
+# caixa do que e opaco e recorta um quadrado na faixa de cima dela -, entao
+# isso continua funcionando se o logo for trocado por outro recorte.
 # Roda no Windows PowerShell 5.1 (powershell.exe).
 
 $ErrorActionPreference = 'Stop'
@@ -9,19 +13,77 @@ $raiz = Split-Path -Parent $PSScriptRoot
 $origem = Join-Path $raiz 'assets\guaxinim.png'
 $alvo = Join-Path $raiz 'icon.ico'
 if (Test-Path $alvo) { Write-Host "Ja existe: $alvo"; exit 0 }
-if (-not (Test-Path $origem)) { Write-Error "Gere antes o $origem (tools\make-guaxinim-png.ps1)"; exit 1 }
+if (-not (Test-Path $origem)) { Write-Error "Coloque o logo recortado em $origem"; exit 1 }
 
+$codigo = @'
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+
+public static class Cabeca
+{
+    const double FAIXA = 0.38;   // fracao do alto do sujeito onde esta a cabeca
+    const int ALFA_MIN = 25;
+
+    // Devolve o quadrado (x,y,lado) que enquadra a cabeca.
+    public static int[] Achar(string caminho)
+    {
+        using (var bmp = new Bitmap(caminho))
+        {
+            int w = bmp.Width, h = bmp.Height;
+            var dados = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly,
+                PixelFormat.Format32bppArgb);
+            byte[] buf = new byte[w * h * 4];
+            System.Runtime.InteropServices.Marshal.Copy(dados.Scan0, buf, 0, buf.Length);
+            bmp.UnlockBits(dados);
+
+            int x0 = w, y0 = h, x1 = -1, y1 = -1;
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    if (buf[(y * w + x) * 4 + 3] > ALFA_MIN)
+                    {
+                        if (x < x0) x0 = x;
+                        if (x > x1) x1 = x;
+                        if (y < y0) y0 = y;
+                        if (y > y1) y1 = y;
+                    }
+            if (x1 < 0) throw new Exception("PNG sem nada opaco.");
+
+            int fim = y0 + (int)((y1 - y0 + 1) * FAIXA);
+            int fx0 = w, fx1 = -1;
+            for (int y = y0; y <= fim; y++)
+                for (int x = 0; x < w; x++)
+                    if (buf[(y * w + x) * 4 + 3] > ALFA_MIN)
+                    {
+                        if (x < fx0) fx0 = x;
+                        if (x > fx1) fx1 = x;
+                    }
+
+            int larguraCabeca = fx1 - fx0 + 1;
+            int alturaCabeca = fim - y0 + 1;
+            int lado = Math.Max(larguraCabeca, alturaCabeca);
+            lado += lado / 12;                       // respiro em volta
+            int cx = (fx0 + fx1) / 2;
+            int x = cx - lado / 2;
+            int y = y0 - lado / 20;
+            Console.WriteLine("Sujeito: " + x0 + "," + y0 + " ate " + x1 + "," + y1 +
+                              "  ->  cabeca: " + x + "," + y + " lado " + lado);
+            return new int[] { x, y, lado };
+        }
+    }
+}
+'@
+Add-Type -TypeDefinition $codigo -ReferencedAssemblies System.Drawing
+
+$q = [Cabeca]::Achar($origem)
 $img = New-Object System.Drawing.Bitmap($origem)
 try {
-    # So a cabeca: os 62% de cima do recorte, num quadrado centralizado.
-    $alturaCabeca = [int]($img.Height * 0.62)
-    $lado = [Math]::Max($alturaCabeca, $img.Width)
-    $quadrado = New-Object System.Drawing.Bitmap($lado, $lado)
+    $quadrado = New-Object System.Drawing.Bitmap($q[2], $q[2])
     $g = [System.Drawing.Graphics]::FromImage($quadrado)
     $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $g.DrawImage($img,
-        (New-Object System.Drawing.Rectangle(([int](($lado - $img.Width) / 2)), 0, $img.Width, $alturaCabeca)),
-        (New-Object System.Drawing.Rectangle(0, 0, $img.Width, $alturaCabeca)),
+        (New-Object System.Drawing.Rectangle(0, 0, $q[2], $q[2])),
+        (New-Object System.Drawing.Rectangle($q[0], $q[1], $q[2], $q[2])),
         [System.Drawing.GraphicsUnit]::Pixel)
     $g.Dispose()
 
@@ -39,6 +101,7 @@ try {
         $pngs += ,@($t, $ms.ToArray())
         $ms.Dispose()
     }
+    $quadrado.Dispose()
 
     $fs = [System.IO.File]::Create($alvo)
     $bw = New-Object System.IO.BinaryWriter($fs)

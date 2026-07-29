@@ -18,12 +18,10 @@ if not exist lib\Interop.WUApiLib.dll (
   exit /b 1
 )
 
-rem Guaxinim recortado (fundo transparente), usado na abertura e na tela final
+rem Logo recortado (PNG com fundo transparente), usado na abertura e no topo
+rem da tela final. E um arquivo versionado do projeto, nao gerado no build.
 if not exist assets\guaxinim.png (
-  "%PS%" -NoProfile -ExecutionPolicy Bypass -File tools\make-guaxinim-png.ps1
-)
-if not exist assets\guaxinim.png (
-  echo *** FALHA: assets\guaxinim.png nao foi gerado ***
+  echo *** FALHA: coloque o logo recortado em assets\guaxinim.png ***
   exit /b 1
 )
 

@@ -19,25 +19,14 @@ namespace AutoInstall
     // XML explicito, e no fim a instalacao e CONFERIDA no registro.
     public class InstaladorOffice
     {
-        public const string EDICAO_CONSUMIDOR = "consumidor";
-        public const string EDICAO_EMPRESARIAL = "empresarial";
-        public const string EDICAO_NENHUMA = "nenhuma";
+        // Sempre o Microsoft 365 Personal/Família (a edicao de consumidor), em
+        // portugues. E a que combina com a assinatura da clientela da loja.
+        public const string PRODUTO = "O365HomePremRetail";
+        public const string NOME = "Microsoft 365 Personal/Família";
 
         const string URL_SETUP = "https://officecdn.microsoft.com/pr/wsus/setup.exe";
         const string CHAVE_C2R = @"SOFTWARE\Microsoft\Office\ClickToRun\Configuration";
         const int TIMEOUT_MIN = 75;
-
-        public static string NomeEdicao(string edicao)
-        {
-            if (edicao == EDICAO_EMPRESARIAL) return "Microsoft 365 Apps for enterprise";
-            if (edicao == EDICAO_NENHUMA) return "Office (não instalar)";
-            return "Microsoft 365 (Personal/Família)";
-        }
-
-        static string ProdutoDe(string edicao)
-        {
-            return edicao == EDICAO_EMPRESARIAL ? "O365ProPlusRetail" : "O365HomePremRetail";
-        }
 
         // Le a versao direto do registro do Click-to-Run: e a unica prova de
         // que o Office esta mesmo instalado.
@@ -72,18 +61,11 @@ namespace AutoInstall
         // "progresso" recebe (percentual, detalhe). O Office Deployment Tool
         // nao publica percentual nenhum, entao aqui ele e uma estimativa pelo
         // tempo decorrido - e o texto ao lado diz exatamente isso.
-        public AppInstalado Instalar(string edicao, Action<string> log, Action<int, string> progresso)
+        public AppInstalado Instalar(Action<string> log, Action<int, string> progresso)
         {
             var app = new AppInstalado();
             app.Nome = "Microsoft Office 365";
-            app.Id = ProdutoDe(edicao);
-
-            if (edicao == EDICAO_NENHUMA)
-            {
-                app.Status = "não instalado (opção escolhida pelo técnico)";
-                log("Office: instalação dispensada nesta máquina.");
-                return app;
-            }
+            app.Id = PRODUTO;
 
             string jaTem = VersaoInstalada();
             if (jaTem != null)
@@ -95,7 +77,7 @@ namespace AutoInstall
                 return app;
             }
 
-            app.Nome = "Microsoft Office 365 — " + NomeEdicao(edicao);
+            app.Nome = "Microsoft Office 365 — " + NOME;
             string pasta = Path.Combine(Path.GetTempPath(), "slt-office");
             string setup = Path.Combine(pasta, "setup.exe");
             string xml = Path.Combine(pasta, "config.xml");
@@ -107,7 +89,7 @@ namespace AutoInstall
                 ServicePointManager.SecurityProtocol =
                     ServicePointManager.SecurityProtocol | SecurityProtocolType.Tls12;
                 using (var wc = new WebClient()) wc.DownloadFile(URL_SETUP, setup);
-                File.WriteAllText(xml, MontarXml(edicao), new UTF8Encoding(false));
+                File.WriteAllText(xml, MontarXml(), new UTF8Encoding(false));
             }
             catch (Exception ex)
             {
@@ -116,7 +98,7 @@ namespace AutoInstall
                 return app;
             }
 
-            log("Office: instalando " + NomeEdicao(edicao) +
+            log("Office: instalando " + NOME +
                 " em português (pt-BR). Isso costuma levar de 10 a 30 minutos.");
             var relogio = Stopwatch.StartNew();
             int codigo = -1;
@@ -169,13 +151,13 @@ namespace AutoInstall
             return app;
         }
 
-        static string MontarXml(string edicao)
+        static string MontarXml()
         {
             string bits = Environment.Is64BitOperatingSystem ? "64" : "32";
             var sb = new StringBuilder();
             sb.AppendLine("<Configuration>");
             sb.AppendLine("  <Add OfficeClientEdition=\"" + bits + "\" Channel=\"Current\">");
-            sb.AppendLine("    <Product ID=\"" + ProdutoDe(edicao) + "\">");
+            sb.AppendLine("    <Product ID=\"" + PRODUTO + "\">");
             sb.AppendLine("      <Language ID=\"pt-br\" />");
             sb.AppendLine("      <ExcludeApp ID=\"Groove\" />");
             sb.AppendLine("      <ExcludeApp ID=\"Lync\" />");
