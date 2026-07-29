@@ -132,14 +132,28 @@ namespace AutoInstall
                 Log("Consultando atualizações na Microsoft Store...");
                 return;
             }
+            if (l.StartsWith("SLT-INFO:"))
+            {
+                Log("Loja: " + l.Substring(9));
+                return;
+            }
             if (l.StartsWith("SLT-TOTAL:"))
             {
+                // O total e cumulativo: a verificacao roda mais de uma vez e
+                // pode achar apps novos depois de instalar a primeira leva.
                 int t;
-                if (int.TryParse(l.Substring(10), out t)) Total = t;
+                if (!int.TryParse(l.Substring(10), out t)) return;
+                int antes = Total;
+                Total = t;
                 if (Total == 0)
                 {
-                    Log("Loja: nenhum app com atualização pendente.");
+                    Log("Loja: nenhum app com atualização pendente (verificado mais de uma vez).");
                     Prog(100, "Microsoft Store em dia.");
+                }
+                else if (antes > 0)
+                {
+                    Log(string.Format("Loja: mais {0} app(s) na nova verificação — total {1}.",
+                        Total - antes, Total));
                 }
                 else
                 {

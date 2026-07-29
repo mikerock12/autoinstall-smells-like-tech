@@ -23,6 +23,16 @@ Criado por Maicon Nunes · [www.smellsliketech.com.br](https://www.smellsliketec
    etc.). A tela mostra: quantas foram encontradas, quantas são
    opcionais/drivers, "baixando/instalando X de Y" e **percentual real** de
    download e de instalação (callbacks nativos do agente do Windows Update).
+
+   > **Nada é pulado.** Muitas atualizações — drivers principalmente — se
+   > declaram como "podem pedir interação" (`CanRequestUserInput`) e mesmo
+   > assim instalam sozinhas numa boa. Elas entram todas na fila e a
+   > instalação roda com `ForceQuiet`, que suprime qualquer pedido de
+   > interação. Atualizações de impacto exclusivo (as que não podem dividir o
+   > lote com outras) são instaladas uma a uma, depois do lote normal — juntas
+   > elas derrubariam a operação inteira. Se alguma realmente não instalar sem
+   > usuário, falha só ela, fica registrada no relatório e a rodada seguinte
+   > tenta de novo.
 4. **Reinicia e retoma sozinho** — após instalar, pede para reiniciar (com
    contagem regressiva de 60 s). Uma tarefa agendada reabre o programa no
    logon, que **procura de novo e instala de novo**, repetindo o ciclo até
@@ -46,6 +56,11 @@ Criado por Maicon Nunes · [www.smellsliketech.com.br](https://www.smellsliketec
      `tools\loja-update.ps1` embutido no exe), com progresso por app e no
      total; se a API falhar, abre a página de downloads da Loja como
      fallback. (O winget não cobre bem os apps UWP — visto em campo.)
+     A verificação roda **até 3 vezes**: o catálogo da Loja às vezes só lista
+     uma atualização na segunda olhada — em campo, a primeira consulta voltou
+     vazia e minutos depois havia atualização pendente. Vazio na primeira,
+     espera 30 s e confere de novo; instalou algo, confere mais uma vez para
+     pegar retardatárias.
    - **Programas de desktop**: `winget upgrade --all`, repetido em passadas
      até não restar nenhuma atualização pendente (máx. 5 passadas).
 8. **Tela final** — o Guaxinim de novo + relatório completo: todas as

@@ -10,6 +10,7 @@ namespace AutoInstall
         public string Titulo;
         public bool Opcional;
         public bool Driver;
+        public bool Interativa;   // declara que PODE pedir interacao
         public string Resultado;
     }
 
@@ -19,7 +20,7 @@ namespace AutoInstall
         public List<ItemUpdate> Itens = new List<ItemUpdate>();
         public int Opcionais;
         public int Drivers;
-        public int Ignorados;   // exigem interacao do usuario -> pulados
+        public int Interativas;
         public int Total { get { return Itens.Count; } }
     }
 
@@ -85,9 +86,13 @@ namespace AutoInstall
                     catch { }
                 }
 
-                bool interativo = false;
-                try { interativo = u.InstallationBehavior.CanRequestUserInput; } catch { }
-                if (interativo) { rb.Ignorados++; continue; }
+                // CanRequestUserInput NAO e motivo para pular: drivers quase
+                // sempre se declaram assim e instalam silenciosamente numa
+                // boa. A instalacao roda com ForceQuiet, que suprime qualquer
+                // pedido de interacao; se alguma realmente nao puder instalar
+                // sem usuario, falha sozinha e fica registrada no relatorio.
+                bool interativa = false;
+                try { interativa = u.InstallationBehavior.CanRequestUserInput; } catch { }
 
                 try { if (!u.EulaAccepted) u.AcceptEula(); } catch { }
 
@@ -96,9 +101,11 @@ namespace AutoInstall
                 item.Titulo = u.Title;
                 item.Opcional = opcional;
                 item.Driver = driver;
+                item.Interativa = interativa;
                 rb.Itens.Add(item);
                 if (opcional) rb.Opcionais++;
                 if (driver) rb.Drivers++;
+                if (interativa) rb.Interativas++;
             }
             return rb;
         }
@@ -132,32 +139,92 @@ namespace AutoInstall
         public void Instalar(ResultadoBusca busca)
         {
             IUpdateSession3 s = ObterSessao();
-            IUpdateInstaller inst = s.CreateUpdateInstaller();
-            inst.Updates = busca.Colecao;
-            IInstallationResult resultado;
-            using (var fim = new ManualResetEvent(false))
-            {
-                IInstallationJob job = inst.BeginInstall(
-                    new CbInstalacaoProgresso(this, busca), new CbInstalacaoFim(fim), null);
-                fim.WaitOne();
-                resultado = inst.EndInstall(job);
-            }
-
-            for (int i = 0; i < busca.Itens.Count; i++)
-            {
-                try
-                {
-                    var r = resultado.GetUpdateResult(i);
-                    int cod = (int)r.ResultCode;                   // 2 = ok, 3 = ok com avisos
-                    if (cod == 2) busca.Itens[i].Resultado = "ok";
-                    else if (cod == 3) busca.Itens[i].Resultado = "ok com avisos";
-                    else busca.Itens[i].Resultado = "código " + cod;
-                }
-                catch { busca.Itens[i].Resultado = "?"; }
-            }
-
+            int total = busca.Itens.Count;
             RebootNecessario = false;
-            try { RebootNecessario = resultado.RebootRequired; } catch { }
+
+            // Atualizacoes com Impact "exclusivo" (ex.: upgrades de versao) so
+            // podem ser instaladas sozinhas: misturadas ao lote, derrubam a
+            // operacao inteira (0x8024000B). Separa: lote normal primeiro,
+            // depois cada exclusiva por vez.
+            var lote = new List<int>();
+            var exclusivas = new List<int>();
+            for (int i = 0; i < total; i++)
+            {
+                bool exclusiva = false;
+                try { exclusiva = ((int)busca.Colecao[i].InstallationBehavior.Impact == 2); }
+                catch { }
+                if (exclusiva) exclusivas.Add(i);
+                else lote.Add(i);
+            }
+
+            int concluidas = 0;
+            if (lote.Count > 0)
+            {
+                InstalarParte(s, busca, lote, concluidas, total);
+                concluidas += lote.Count;
+            }
+            foreach (int i in exclusivas)
+            {
+                var sozinha = new List<int>();
+                sozinha.Add(i);
+                InstalarParte(s, busca, sozinha, concluidas, total);
+                concluidas++;
+            }
+        }
+
+        void InstalarParte(IUpdateSession3 s, ResultadoBusca busca, List<int> indices,
+            int jaConcluidas, int total)
+        {
+            try
+            {
+                var col = (UpdateCollection)Activator.CreateInstance(
+                    Type.GetTypeFromProgID("Microsoft.Update.UpdateColl"));
+                foreach (int i in indices) col.Add(busca.Colecao[i]);
+
+                IUpdateInstaller inst = s.CreateUpdateInstaller();
+                inst.Updates = col;
+                try { inst.AllowSourcePrompts = false; } catch { }
+                // ForceQuiet: instala sem nenhuma interacao, inclusive as
+                // atualizacoes que declaram CanRequestUserInput (drivers).
+                var inst2 = inst as IUpdateInstaller2;
+                if (inst2 != null)
+                {
+                    try { inst2.ForceQuiet = true; } catch { }
+                }
+
+                IInstallationResult resultado;
+                using (var fim = new ManualResetEvent(false))
+                {
+                    IInstallationJob job = inst.BeginInstall(
+                        new CbInstalacaoProgresso(this, busca, indices, jaConcluidas, total),
+                        new CbInstalacaoFim(fim), null);
+                    fim.WaitOne();
+                    resultado = inst.EndInstall(job);
+                }
+
+                for (int k = 0; k < indices.Count; k++)
+                {
+                    try
+                    {
+                        var r = resultado.GetUpdateResult(k);
+                        int cod = (int)r.ResultCode;               // 2 = ok, 3 = ok com avisos
+                        if (cod == 2) busca.Itens[indices[k]].Resultado = "ok";
+                        else if (cod == 3) busca.Itens[indices[k]].Resultado = "ok com avisos";
+                        else busca.Itens[indices[k]].Resultado = "código " + cod;
+                    }
+                    catch { busca.Itens[indices[k]].Resultado = "?"; }
+                }
+
+                try { if (resultado.RebootRequired) RebootNecessario = true; } catch { }
+            }
+            catch (Exception ex)
+            {
+                // Falha desta parte nao derruba as demais; fica no relatorio
+                // e a proxima rodada (pos-reinicio) tenta de novo.
+                foreach (int i in indices)
+                    if (busca.Itens[i].Resultado == null)
+                        busca.Itens[i].Resultado = "falhou (" + ex.Message + ")";
+            }
         }
 
         // ---- Callbacks COM (chamados pelo agente do Windows Update) ----
@@ -194,23 +261,38 @@ namespace AutoInstall
             }
         }
 
+        // A instalacao pode rodar em partes (lote normal + exclusivas): o
+        // callback recebe o mapa de indices da parte atual e o quanto ja foi
+        // concluido antes dela, para o percentual geral cobrir o conjunto todo.
         class CbInstalacaoProgresso : IInstallationProgressChangedCallback
         {
             readonly AtualizadorWindows dono;
             readonly ResultadoBusca busca;
-            public CbInstalacaoProgresso(AtualizadorWindows dono, ResultadoBusca busca)
+            readonly List<int> indices;
+            readonly int jaConcluidas;
+            readonly int total;
+            public CbInstalacaoProgresso(AtualizadorWindows dono, ResultadoBusca busca,
+                List<int> indices, int jaConcluidas, int total)
             {
-                this.dono = dono; this.busca = busca;
+                this.dono = dono;
+                this.busca = busca;
+                this.indices = indices;
+                this.jaConcluidas = jaConcluidas;
+                this.total = total;
             }
             public void Invoke(IInstallationJob job, IInstallationProgressChangedCallbackArgs e)
             {
                 try
                 {
                     IInstallationProgress p = e.Progress;
-                    int idx = p.CurrentUpdateIndex;
-                    string titulo = (idx >= 0 && idx < busca.Itens.Count) ? busca.Itens[idx].Titulo : "";
+                    int k = p.CurrentUpdateIndex;
+                    int original = (k >= 0 && k < indices.Count) ? indices[k] : 0;
+                    string titulo = (original < busca.Itens.Count) ? busca.Itens[original].Titulo : "";
+                    int geral = total > 0
+                        ? (jaConcluidas * 100 + p.PercentComplete * indices.Count) / total
+                        : p.PercentComplete;
                     var h = dono.AoProgredirInstalacao;
-                    if (h != null) h(p.PercentComplete, idx + 1, p.CurrentUpdatePercentComplete, titulo);
+                    if (h != null) h(geral, original + 1, p.CurrentUpdatePercentComplete, titulo);
                 }
                 catch { }
             }

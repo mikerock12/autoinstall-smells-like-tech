@@ -268,8 +268,10 @@ namespace AutoInstall
             telaProg.Contagens(string.Format(
                 "Atualizações encontradas: {0}   ·   Opcionais/drivers: {1}",
                 busca.Total, busca.Opcionais));
-            if (busca.Ignorados > 0)
-                log(string.Format("{0} atualização(ões) que exigem interação foram puladas.", busca.Ignorados));
+            if (busca.Interativas > 0)
+                log(string.Format(
+                    "{0} atualização(ões) declaram que podem pedir interação (normal em drivers) — " +
+                    "todas entram na fila e instalam em modo silencioso forçado.", busca.Interativas));
 
             if (busca.Total == 0)
             {
