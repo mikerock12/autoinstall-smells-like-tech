@@ -41,6 +41,24 @@ Criado por Maicon Nunes · [www.smellsliketech.com.br](https://www.smellsliketec
    WinRAR e K-Lite Codec Pack Standard (codecs de áudio/vídeo atualizados +
    player leve MPC-HC). Se o winget ainda não existir (comum após formatar),
    o programa baixa e registra o App Installer sozinho.
+
+   > **Quem decide se instalou é o sistema, não o código de saída do winget.**
+   > Depois de cada tentativa o programa consulta `winget list` para ver se o
+   > programa está mesmo lá — o winget às vezes devolve erro com o programa
+   > instalado, e o contrário também acontece. O relatório traz **a mensagem
+   > do próprio winget** (já traduzida) junto do código, em vez de só o hex.
+   >
+   > Duas redes de proteção quando falha:
+   > 1. **Hash desatualizado** (`0x8A150011`): acontece quando o fabricante
+   >    republica o instalador no mesmo endereço e o manifesto do winget fica
+   >    para trás — o Chrome é o caso clássico. Só nesse caso o programa
+   >    libera `InstallerHashOverride` e repete com `--ignore-security-hash`.
+   >    O download continua vindo do site oficial por HTTPS; o que se ignora é
+   >    a conferência contra o manifesto, que está velho.
+   > 2. **Instalador oficial do fabricante** como último recurso, para os
+   >    programas que têm um endereço confiável cadastrado (hoje o Chrome, com
+   >    o MSI corporativo do Google). O download é conferido — tamanho e erro
+   >    de rede — antes de qualquer coisa ser executada.
 6. **Office 365** — sempre o **Microsoft 365 Personal/Família**, em português
    (pt-BR), instalado pelo **Office Deployment Tool oficial** com XML de
    configuração explícito e, no fim, **conferido no registro** do Click-to-Run.
