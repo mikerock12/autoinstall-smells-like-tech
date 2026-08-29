@@ -17,6 +17,9 @@ namespace AutoInstall
         public static readonly Color Texto = Color.FromArgb(235, 235, 235);
         public static readonly Color TextoSuave = Color.FromArgb(168, 173, 180);
         public static readonly Color Borda = Color.FromArgb(52, 56, 64);
+        public static readonly Color Cartao = Color.FromArgb(22, 25, 32);
+        public static readonly Color CartaoHover = Color.FromArgb(31, 35, 44);
+        public static readonly Color LaranjaBorda = Color.FromArgb(132, 78, 24);
 
         public const string SITE_URL = "https://www.smellsliketech.com.br";
         public const string SITE_TEXTO = "www.smellsliketech.com.br";

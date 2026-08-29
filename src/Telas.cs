@@ -289,8 +289,8 @@ namespace AutoInstall
         }
     }
 
-    // Tela final: Guaxinim de novo, relatorio completo do que foi instalado
-    // e convite para o site e o Instagram.
+    // Tela final: Guaxinim de novo, o agradecimento, o relatorio completo do
+    // que foi feito e o convite para o site e o Instagram.
     public class TelaFinal : Panel
     {
         public event Action AoFechar;
@@ -299,6 +299,7 @@ namespace AutoInstall
         readonly FadeImagem imagem;
         readonly TextBox caixaRelatorio;
         readonly Label lblTitulo;
+        readonly Label lblSub;
 
         public TelaFinal(Image guaxinim)
         {
@@ -306,16 +307,23 @@ namespace AutoInstall
 
             imagem = new FadeImagem();
             imagem.Imagem = guaxinim;
-            imagem.SetBounds(0, 8, 920, 200);
+            imagem.SetBounds(0, 6, 920, 166);
             Controls.Add(imagem);
 
             lblTitulo = new Label();
-            lblTitulo.Text = "Tudo pronto!";
-            lblTitulo.Font = new Font("Segoe UI Semibold", 17f);
+            lblTitulo.Text = "Obrigado por usar o AutoInstall Smells Like Tech!";
+            lblTitulo.Font = new Font("Segoe UI Semibold", 16f);
             lblTitulo.ForeColor = Tema.Laranja;
             lblTitulo.TextAlign = ContentAlignment.MiddleCenter;
-            lblTitulo.SetBounds(0, 212, 920, 38);
+            lblTitulo.SetBounds(0, 174, 920, 36);
             Controls.Add(lblTitulo);
+
+            lblSub = new Label();
+            lblSub.Font = new Font("Segoe UI", 10f);
+            lblSub.ForeColor = Tema.TextoSuave;
+            lblSub.TextAlign = ContentAlignment.MiddleCenter;
+            lblSub.SetBounds(0, 210, 920, 22);
+            Controls.Add(lblSub);
 
             caixaRelatorio = new TextBox();
             caixaRelatorio.Multiline = true;
@@ -326,15 +334,15 @@ namespace AutoInstall
             caixaRelatorio.BackColor = Tema.FundoEscuro;
             caixaRelatorio.ForeColor = Color.FromArgb(200, 204, 210);
             caixaRelatorio.Font = new Font("Consolas", 9f);
-            caixaRelatorio.SetBounds(60, 256, 800, 238);
+            caixaRelatorio.SetBounds(60, 238, 800, 260);
             Controls.Add(caixaRelatorio);
 
             var lblConvite = new Label();
-            lblConvite.Text = "Gostou do serviço? Acesse o site e siga a Smells Like Tech no Instagram:";
+            lblConvite.Text = "Precisa de ajuda com o seu computador? Fale com a gente:";
             lblConvite.Font = new Font("Segoe UI", 10.5f);
             lblConvite.ForeColor = Tema.Texto;
             lblConvite.TextAlign = ContentAlignment.MiddleCenter;
-            lblConvite.SetBounds(0, 502, 920, 24);
+            lblConvite.SetBounds(0, 504, 920, 22);
             Controls.Add(lblConvite);
 
             var linkSite = new LinkLabel();
@@ -366,7 +374,7 @@ namespace AutoInstall
             btnFechar.FlatAppearance.BorderSize = 0;
             btnFechar.BackColor = Tema.Laranja;
             btnFechar.ForeColor = Color.FromArgb(24, 16, 6);
-            btnFechar.SetBounds(380, 558, 160, 38);
+            btnFechar.SetBounds(380, 556, 160, 38);
             btnFechar.Cursor = Cursors.Hand;
             btnFechar.Click += delegate
             {
@@ -375,17 +383,17 @@ namespace AutoInstall
             };
             Controls.Add(btnFechar);
 
-            // Discreto de proposito: serve para o tecnico rodar tudo de novo
-            // na mesma maquina (conferir a Loja, reinstalar algo que falhou),
-            // sem competir com o botao Fechar.
+            // Discreto de proposito: serve para o tecnico voltar a tela de
+            // escolha e rodar outra combinacao na mesma maquina, sem competir
+            // com o botao Fechar.
             var btnRefazer = new LinkLabel();
-            btnRefazer.Text = "Refazer todas as etapas";
+            btnRefazer.Text = "Escolher etapas e rodar de novo";
             btnRefazer.Font = new Font("Segoe UI", 8.75f);
             btnRefazer.LinkColor = Tema.TextoSuave;
             btnRefazer.ActiveLinkColor = Tema.LaranjaClaro;
             btnRefazer.VisitedLinkColor = Tema.TextoSuave;
             btnRefazer.TextAlign = ContentAlignment.MiddleLeft;
-            btnRefazer.SetBounds(60, 568, 200, 20);
+            btnRefazer.SetBounds(60, 566, 260, 20);
             btnRefazer.LinkClicked += delegate { ConfirmarRefazer(); };
             Controls.Add(btnRefazer);
         }
@@ -393,11 +401,10 @@ namespace AutoInstall
         void ConfirmarRefazer()
         {
             var r = MessageBox.Show(
-                "Refazer todas as etapas nesta máquina?\n\n" +
-                "O relatório atual é descartado e o processo recomeça do zero: " +
-                "energia, Windows Update (com reinicializações), programas e " +
-                "atualização dos aplicativos da Microsoft Store.",
-                "AutoInstall — refazer tudo", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                "Voltar para a tela de escolha?\n\n" +
+                "O relatório atual é descartado e você escolhe de novo o que fazer " +
+                "nesta máquina — útil para reconferir uma etapa ou instalar mais programas.",
+                "AutoInstall — rodar de novo", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
                 MessageBoxDefaultButton.Button2);
             if (r != DialogResult.Yes) return;
             var h = AoRefazer;
@@ -406,7 +413,16 @@ namespace AutoInstall
 
         public void Preencher(Estado e)
         {
-            lblTitulo.Text = e.Interrompido ? "Processo interrompido" : "Tudo pronto!";
+            if (e.Interrompido)
+            {
+                lblTitulo.Text = "Processo interrompido";
+                lblSub.Text = "Abaixo está tudo o que deu tempo de concluir nesta máquina.";
+            }
+            else
+            {
+                lblTitulo.Text = "Obrigado por usar o AutoInstall Smells Like Tech!";
+                lblSub.Text = "Tudo pronto. Abaixo, o relatório completo do que foi feito nesta máquina.";
+            }
             caixaRelatorio.Text = MontarRelatorio(e);
             caixaRelatorio.Select(0, 0);
 
@@ -423,10 +439,12 @@ namespace AutoInstall
             fade.Start();
         }
 
+        // So entram no relatorio as etapas que foram escolhidas: um relatorio
+        // com secoes vazias so faz o tecnico procurar erro onde nao houve.
         static string MontarRelatorio(Estado e)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("RESUMO DO PÓS-FORMATAÇÃO — SMELLS LIKE TECH INFORMÁTICA");
+            sb.AppendLine("RELATÓRIO DO AUTOINSTALL — SMELLS LIKE TECH INFORMÁTICA");
             if (!string.IsNullOrEmpty(e.InicioEm))
                 sb.AppendLine(string.Format("Início: {0}   ·   Reinicializações: {1}", e.InicioEm, e.Reinicios));
             if (e.Interrompido)
@@ -434,46 +452,62 @@ namespace AutoInstall
                               "o que está abaixo é só o que deu tempo de concluir.");
             sb.AppendLine();
 
-            sb.AppendLine("== ATUALIZAÇÕES DO WINDOWS ==");
-            int total = 0;
-            if (e.Rodadas.Count == 0)
-                sb.AppendLine("  (nenhuma atualização pendente foi encontrada)");
-            foreach (var r in e.Rodadas)
+            if (e.FazerWindowsUpdate)
             {
-                sb.AppendLine(string.Format("  Verificação {0} — {1} atualização(ões):",
-                    r.Numero, r.Atualizacoes.Count));
-                foreach (string a in r.Atualizacoes)
+                sb.AppendLine("== ATUALIZAÇÕES DO WINDOWS ==");
+                int total = 0;
+                if (e.Rodadas.Count == 0)
+                    sb.AppendLine("  (nenhuma atualização pendente foi encontrada)");
+                foreach (var r in e.Rodadas)
                 {
-                    sb.AppendLine("    • " + a);
-                    total++;
+                    sb.AppendLine(string.Format("  Verificação {0} — {1} atualização(ões):",
+                        r.Numero, r.Atualizacoes.Count));
+                    foreach (string a in r.Atualizacoes)
+                    {
+                        sb.AppendLine("    • " + a);
+                        total++;
+                    }
                 }
+                sb.AppendLine(string.Format("  Total: {0} atualização(ões) em {1} verificação(ões).",
+                    total, e.Rodadas.Count));
+                sb.AppendLine();
             }
-            sb.AppendLine(string.Format("  Total: {0} atualização(ões) em {1} verificação(ões).",
-                total, e.Rodadas.Count));
-            sb.AppendLine();
 
-            sb.AppendLine("== PROGRAMAS ==");
-            if (e.Apps.Count == 0)
-                sb.AppendLine("  (nenhum programa registrado)");
-            foreach (var app in e.Apps)
+            if (e.FazerInstalacao && e.Escolhidos.Count > 0)
             {
-                string versao = string.IsNullOrEmpty(app.Versao) ? "" : " — versão " + app.Versao;
-                sb.AppendLine(string.Format("  • {0}{1} — {2}", app.Nome, versao, app.Status));
+                sb.AppendLine("== PROGRAMAS ==");
+                if (e.Apps.Count == 0)
+                    sb.AppendLine("  (nenhum programa registrado)");
+                foreach (var app in e.Apps)
+                {
+                    string versao = string.IsNullOrEmpty(app.Versao) ? "" : " — versão " + app.Versao;
+                    sb.AppendLine(string.Format("  • {0}{1} — {2}", app.Nome, versao, app.Status));
+                }
+                int faltando = e.Escolhidos.Count - e.Apps.Count;
+                if (faltando > 0)
+                    sb.AppendLine(string.Format(
+                        "  ({0} programa(s) escolhido(s) não chegaram a ser processados)", faltando));
+                sb.AppendLine();
             }
-            sb.AppendLine();
 
-            sb.AppendLine("== ATUALIZAÇÃO GERAL DE APLICATIVOS (winget + Microsoft Store) ==");
-            if (e.Upgrades.Count == 0)
-                sb.AppendLine("  (nada registrado)");
-            foreach (string u in e.Upgrades)
-                sb.AppendLine("  • " + u);
-            sb.AppendLine();
+            if (e.FazerAtualizacaoGeral)
+            {
+                sb.AppendLine("== ATUALIZAÇÃO GERAL (winget + Microsoft Store) ==");
+                if (e.Upgrades.Count == 0)
+                    sb.AppendLine("  (nada registrado)");
+                foreach (string u in e.Upgrades)
+                    sb.AppendLine("  • " + u);
+                sb.AppendLine();
+            }
 
             sb.AppendLine("== ENERGIA ==");
             sb.AppendLine("  • Durante o processo: desempenho máximo, tela/discos sempre ligados,");
             sb.AppendLine("    sem suspender e sem hibernar.");
             sb.AppendLine("  • Ao final: plano Equilibrado (recomendado) restaurado e o plano");
             sb.AppendLine("    temporário removido.");
+            sb.AppendLine();
+            sb.AppendLine("Obrigado por usar o AutoInstall Smells Like Tech!");
+            sb.AppendLine("www.smellsliketech.com.br  ·  instagram.com/smellsliketechinfo");
             return sb.ToString();
         }
     }

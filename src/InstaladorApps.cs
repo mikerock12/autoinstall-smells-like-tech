@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -9,51 +10,30 @@ using System.Threading;
 
 namespace AutoInstall
 {
-    public class ProgramaAlvo
-    {
-        public string Nome;
-        public string Id;
-        // Instalador oficial do fabricante, usado so se o winget falhar em
-        // todas as tentativas. .msi roda pelo msiexec; .exe usa ArgsReserva.
-        public string UrlReserva;
-        public string ArgsReserva;
-
-        public ProgramaAlvo(string nome, string id) { Nome = nome; Id = id; }
-
-        public ProgramaAlvo(string nome, string id, string urlReserva, string argsReserva)
-        {
-            Nome = nome;
-            Id = id;
-            UrlReserva = urlReserva;
-            ArgsReserva = argsReserva;
-        }
-    }
-
-    // Instalacao de programas e atualizacao geral via winget (Windows Package
-    // Manager), com bootstrap do App Installer caso o winget ainda nao exista
-    // (comum logo apos formatar).
+    // Instalacao dos programas escolhidos na primeira tela e atualizacao geral
+    // dos que ja estao na maquina.
+    //
+    // Cada app do catalogo traz uma ou mais vias de instalacao em ordem de
+    // preferencia (winget, Microsoft Store, script PowerShell, instalador
+    // oficial do fabricante). Elas sao tentadas uma a uma ate a maquina provar
+    // que o programa esta la — quem decide se instalou e o sistema, nunca o
+    // codigo de saida do instalador.
     public class InstaladorApps
     {
-        public static readonly ProgramaAlvo[] Programas = new ProgramaAlvo[]
-        {
-            // Chrome tem reserva porque e o pacote mais sujeito a hash velho no
-            // manifesto: o Google republica o instalador no mesmo endereco com
-            // frequencia. O MSI corporativo abaixo e o endereco oficial.
-            new ProgramaAlvo("Google Chrome", "Google.Chrome",
-                "https://dl.google.com/tag/s/dl/chrome/install/googlechromestandaloneenterprise64.msi", null),
-            new ProgramaAlvo("Adobe Acrobat Reader", "Adobe.Acrobat.Reader.64-bit"),
-            new ProgramaAlvo("WinRAR", "RARLab.WinRAR"),
-            // K-Lite Standard = codecs de audio/video atualizados + MPC-HC,
-            // player leve e recomendado (melhor que os que vem com o Windows)
-            new ProgramaAlvo("K-Lite Codec Pack (codecs + player MPC-HC)", "CodecGuide.K-LiteCodecPack.Standard"),
-            // O Office NAO entra aqui: o pacote Microsoft.Office do winget so
-            // baixa o motor do Office Deployment Tool e sai sem instalar nada.
-            // Ele tem instalador proprio em InstaladorOffice.cs.
-        };
+        const string ARGS_COMUNS =
+            " --accept-package-agreements --accept-source-agreements --disable-interactivity";
 
-        const string ARGS_COMUNS = " --accept-package-agreements --accept-source-agreements --disable-interactivity";
+        // 0x8A15002B: "nenhuma atualizacao aplicavel" - ja esta na ultima versao.
+        const int COD_SEM_ATUALIZACAO = unchecked((int)0x8A15002B);
+        // 0x8A150011: o hash do instalador nao confere com o do manifesto.
+        const int COD_HASH = unchecked((int)0x8A150011);
 
         string winget;
+        bool hashLiberado;
+
+        // ------------------------------------------------------------------
+        // winget: localizar e, se preciso, instalar (comum logo apos formatar)
+        // ------------------------------------------------------------------
 
         string Localizar()
         {
@@ -77,6 +57,8 @@ namespace AutoInstall
             return null;
         }
 
+        public bool TemWinget { get { return winget != null; } }
+
         public bool Garantir(Action<string> log)
         {
             winget = Localizar();
@@ -96,14 +78,14 @@ namespace AutoInstall
                 log("winget instalado com sucesso.");
                 return true;
             }
-            log("ERRO: winget indisponível — a instalação de programas não pôde ser automatizada.");
+            winget = null;
+            log("AVISO: winget indisponível — só as vias alternativas de cada programa serão usadas.");
             return false;
         }
 
         void BootstrapWinget(Action<string> log)
         {
-            ServicePointManager.SecurityProtocol =
-                ServicePointManager.SecurityProtocol | SecurityProtocolType.Tls12;
+            Tls12();
             string tmp = Path.Combine(Path.GetTempPath(), "slt-winget");
             Directory.CreateDirectory(tmp);
 
@@ -123,81 +105,309 @@ namespace AutoInstall
             }
 
             log("Registrando os pacotes do App Installer...");
-            string ps = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe");
-            string cmd = "-NoProfile -ExecutionPolicy Bypass -Command \"" +
-                "Add-AppxPackage -Path '" + Path.Combine(tmp, "vclibs.appx") + "' -ErrorAction SilentlyContinue; " +
-                "Add-AppxPackage -Path '" + Path.Combine(tmp, "uixaml.appx") + "' -ErrorAction SilentlyContinue; " +
-                "Add-AppxPackage -Path '" + Path.Combine(tmp, "appinstaller.msixbundle") + "\'\"";
-            Executor.Rodar(ps, cmd);
+            RodarPowerShell(
+                "Add-AppxPackage -Path '" + Path.Combine(tmp, "vclibs.appx") + "' -ErrorAction SilentlyContinue\r\n" +
+                "Add-AppxPackage -Path '" + Path.Combine(tmp, "uixaml.appx") + "' -ErrorAction SilentlyContinue\r\n" +
+                "Add-AppxPackage -Path '" + Path.Combine(tmp, "appinstaller.msixbundle") + "'\r\n",
+                null);
         }
 
-        // 0x8A15002B: "nenhuma atualizacao aplicavel" - ja esta na ultima versao.
-        const int COD_SEM_ATUALIZACAO = unchecked((int)0x8A15002B);
-        // 0x8A150011: o hash do instalador nao confere com o do manifesto.
-        const int COD_HASH = unchecked((int)0x8A150011);
+        static void Tls12()
+        {
+            ServicePointManager.SecurityProtocol =
+                ServicePointManager.SecurityProtocol | SecurityProtocolType.Tls12;
+        }
 
-        bool hashLiberado;
+        // ------------------------------------------------------------------
+        // Instalacao de um app do catalogo
+        // ------------------------------------------------------------------
 
-        public AppInstalado Instalar(ProgramaAlvo alvo, Action<string> log, Action<int> progresso)
+        // "progresso" recebe (percentual, detalhe) e pode ser nulo.
+        public AppInstalado Instalar(AppCatalogo alvo, Action<string> log, Action<int, string> progresso)
         {
             var app = new AppInstalado();
             app.Nome = alvo.Nome;
-            app.Id = alvo.Id;
-            if (winget == null)
+            app.Id = alvo.Chave;
+
+            // Ja esta na maquina? Nao mexe.
+            string jaTem = Conferir(alvo);
+            if (jaTem != null)
             {
-                app.Status = "não instalado (winget indisponível)";
+                app.Versao = jaTem == "?" ? null : jaTem;
+                app.Status = "já estava instalado";
+                log(alvo.Nome + ": já estava instalado — mantido.");
                 return app;
             }
 
-            string motivo;
-            var r = Tentar(alvo, "", log, progresso, out motivo);
-            // A explicacao boa e a da PRIMEIRA tentativa: as seguintes usam
-            // argumentos extras e, se algo der errado nelas, a mensagem final
-            // seria sobre os argumentos, nao sobre o problema de verdade.
-            string motivoReal = motivo;
-            bool jaEstava = SemAtualizacao(r);
-
-            if (r.Codigo != 0 && !jaEstava)
+            string ultimoMotivo = null;
+            for (int i = 0; i < alvo.Metodos.Length; i++)
             {
-                log(string.Format("{0}: winget falhou (0x{1:X8}){2}", alvo.Nome, r.Codigo,
-                    motivo == null ? "" : " — " + motivo));
-
-                // Segunda tentativa SO quando o problema e o hash - o caso
-                // classico (e o do Chrome) e o fabricante republicar o
-                // instalador no mesmo endereco e o hash do manifesto do winget
-                // ficar velho: o download continua vindo do site oficial por
-                // HTTPS, so a conferencia contra o manifesto e que nao fecha.
-                // Repetir por qualquer outro motivo so gera ruido.
-                if (FalhaDeHash(r, motivo) && LiberarHash(log))
+                MetodoInstalacao m = alvo.Metodos[i];
+                if (m.Via == Via.Winget && winget == null)
                 {
-                    log(alvo.Nome + ": hash do manifesto desatualizado — repetindo sem essa conferência...");
-                    string motivoRepeticao;
-                    r = Tentar(alvo, " --ignore-security-hash --force", log, progresso, out motivoRepeticao);
-                    if (r.Codigo != 0 && !SemAtualizacao(r))
-                        log(string.Format("{0}: a repetição também falhou (0x{1:X8}){2}",
-                            alvo.Nome, r.Codigo, motivoRepeticao == null ? "" : " — " + motivoRepeticao));
+                    ultimoMotivo = "winget indisponível";
+                    continue;
+                }
+                if (m.Via == Via.MSStore && winget == null)
+                {
+                    ultimoMotivo = "winget indisponível (a Loja é acionada por ele)";
+                    continue;
+                }
+
+                if (i > 0)
+                    log(string.Format("{0}: tentando pela via alternativa ({1})...", alvo.Nome, m.Rotulo));
+
+                string motivo;
+                bool jaEstava;
+                Executar(alvo, m, log, progresso, out motivo, out jaEstava);
+                if (motivo != null) ultimoMotivo = motivo;
+
+                string versao = Conferir(alvo);
+                if (versao != null)
+                {
+                    app.Versao = versao == "?" ? null : versao;
+                    app.Status = jaEstava
+                        ? "já estava instalado/atualizado"
+                        : (i == 0 ? "instalado" : "instalado (" + m.Rotulo + ")");
+                    log(string.Format("{0} — {1}{2}", app.Nome, app.Status,
+                        app.Versao == null ? "" : " (versão " + app.Versao + ")"));
+                    return app;
                 }
             }
 
-            if (r.Codigo != 0 && !SemAtualizacao(r) && !string.IsNullOrEmpty(alvo.UrlReserva))
-                InstalarReserva(alvo, log, progresso);
-
-            // Quem decide se instalou e o sistema, nao o codigo de saida: o
-            // winget as vezes devolve erro com o programa instalado, e vice-versa.
-            try { app.Versao = ObterVersao(alvo.Id); } catch { }
-
-            if (app.Versao != null)
-            {
-                if (jaEstava) app.Status = "já estava instalado/atualizado";
-                else if (r.Codigo == 0 || SemAtualizacao(r)) app.Status = "instalado";
-                else app.Status = "instalado pelo instalador oficial do fabricante";
-            }
-            else
-            {
-                app.Status = string.Format("falhou (código 0x{0:X8}){1}", r.Codigo,
-                    motivoReal == null ? "" : ": " + motivoReal);
-            }
+            app.Status = "falhou" + (ultimoMotivo == null ? "" : ": " + ultimoMotivo);
+            log(alvo.Nome + " — " + app.Status);
             return app;
+        }
+
+        // Roda UM metodo. Nao decide nada sobre sucesso: quem confere e o
+        // chamador, olhando a maquina.
+        void Executar(AppCatalogo alvo, MetodoInstalacao m, Action<string> log,
+            Action<int, string> progresso, out string motivo, out bool jaEstava)
+        {
+            motivo = null;
+            jaEstava = false;
+            try
+            {
+                switch (m.Via)
+                {
+                    case Via.Winget:
+                        PorWinget(alvo, m, "", log, progresso, out motivo, out jaEstava);
+                        return;
+                    case Via.MSStore:
+                        PorLoja(alvo, m, log, progresso, out motivo, out jaEstava);
+                        return;
+                    case Via.PowerShell:
+                        PorPowerShell(alvo, m, log, out motivo);
+                        return;
+                    case Via.Direto:
+                        PorInstaladorOficial(alvo, m, log, progresso, out motivo);
+                        return;
+                    case Via.ODT:
+                        PorOfficeDeploymentTool(log, progresso, out motivo);
+                        return;
+                }
+            }
+            catch (Exception ex)
+            {
+                motivo = ex.Message;
+                log(alvo.Nome + ": erro na via " + m.Rotulo + " — " + ex.Message);
+            }
+        }
+
+        void PorWinget(AppCatalogo alvo, MetodoInstalacao m, string extras, Action<string> log,
+            Action<int, string> progresso, out string motivo, out bool jaEstava)
+        {
+            var parse = new ParseWinget(log, progresso, alvo.Nome);
+            var r = Executor.Rodar(winget,
+                "install --id " + m.Alvo + " -e --silent" + ARGS_COMUNS + extras,
+                Encoding.UTF8, parse.Linha);
+            motivo = parse.UltimaMensagem;
+            jaEstava = SemAtualizacao(r);
+            if (r.Codigo == 0 || jaEstava) return;
+
+            log(string.Format("{0}: winget retornou 0x{1:X8}{2}", alvo.Nome, r.Codigo,
+                motivo == null ? "" : " — " + motivo));
+
+            // Repeticao SO quando o problema e o hash. O caso classico e o
+            // fabricante republicar o instalador no mesmo endereco e o hash do
+            // manifesto do winget ficar velho: o download continua vindo do
+            // site oficial por HTTPS, so a conferencia contra o manifesto e que
+            // nao fecha. Repetir por qualquer outro motivo so gera ruido.
+            if (extras.Length == 0 && FalhaDeHash(r, motivo) && LiberarHash(log))
+            {
+                log(alvo.Nome + ": hash do manifesto desatualizado — repetindo sem essa conferência...");
+                string ignorado;
+                bool ignorado2;
+                PorWinget(alvo, m, " --ignore-security-hash --force", log, progresso,
+                    out ignorado, out ignorado2);
+                if (ignorado != null) motivo = ignorado;
+            }
+        }
+
+        void PorLoja(AppCatalogo alvo, MetodoInstalacao m, Action<string> log,
+            Action<int, string> progresso, out string motivo, out bool jaEstava)
+        {
+            var parse = new ParseWinget(log, progresso, alvo.Nome);
+            var r = Executor.Rodar(winget,
+                "install --id " + m.Alvo + " -e --source msstore" + ARGS_COMUNS,
+                Encoding.UTF8, parse.Linha);
+            motivo = parse.UltimaMensagem;
+            jaEstava = SemAtualizacao(r);
+            if (r.Codigo != 0 && !jaEstava)
+                log(string.Format("{0}: a Microsoft Store retornou 0x{1:X8}{2}", alvo.Nome, r.Codigo,
+                    motivo == null ? "" : " — " + motivo));
+        }
+
+        // O comando vai para um .ps1 temporario em vez da linha de comando:
+        // os instaladores oficiais por script ("irm ... | iex") sao cheios de
+        // aspas e chaves, que nao sobrevivem inteiros a um -Command.
+        void PorPowerShell(AppCatalogo alvo, MetodoInstalacao m, Action<string> log, out string motivo)
+        {
+            log(alvo.Nome + ": rodando o script oficial de instalação no PowerShell...");
+            var r = RodarPowerShell(m.Alvo, log);
+            motivo = r.Codigo == 0 ? null : "o script terminou com código " + r.Codigo;
+            if (r.Codigo != 0)
+                log(string.Format("{0}: o script terminou com código {1}.", alvo.Nome, r.Codigo));
+        }
+
+        static ResultadoExec RodarPowerShell(string comando, Action<string> log)
+        {
+            string arquivo = Path.Combine(Path.GetTempPath(),
+                "slt-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".ps1");
+            try
+            {
+                File.WriteAllText(arquivo,
+                    "$ProgressPreference = 'SilentlyContinue'\r\n" +
+                    "[Net.ServicePointManager]::SecurityProtocol = " +
+                    "[Net.SecurityProtocolType]::Tls12 -bor [Net.ServicePointManager]::SecurityProtocol\r\n" +
+                    comando + "\r\n",
+                    new UTF8Encoding(true));
+                string ps = Path.Combine(Environment.SystemDirectory,
+                    @"WindowsPowerShell\v1.0\powershell.exe");
+                return Executor.Rodar(ps,
+                    "-NoProfile -ExecutionPolicy Bypass -File \"" + arquivo + "\"",
+                    Encoding.UTF8,
+                    log == null ? null : (Action<string>)delegate(string l)
+                    {
+                        string t = l.Trim();
+                        if (t.Length > 0) log("    " + t);
+                    });
+            }
+            finally
+            {
+                try { File.Delete(arquivo); } catch { }
+            }
+        }
+
+        // Ultimo recurso: baixa o instalador do site do proprio fabricante,
+        // sempre de um endereco que aponta para a versao mais recente.
+        void PorInstaladorOficial(AppCatalogo alvo, MetodoInstalacao m, Action<string> log,
+            Action<int, string> progresso, out string motivo)
+        {
+            motivo = null;
+            string arquivo = null;
+            try
+            {
+                log(alvo.Nome + ": baixando o instalador oficial do fabricante...");
+                Tls12();
+                arquivo = Path.Combine(Path.GetTempPath(),
+                    "slt-" + alvo.Chave + Extensao(m.Alvo));
+
+                Exception falhaDownload = null;
+                using (var wc = new WebClient())
+                using (var pronto = new ManualResetEvent(false))
+                {
+                    wc.DownloadProgressChanged += delegate(object s, DownloadProgressChangedEventArgs e)
+                    {
+                        if (progresso != null)
+                            progresso(e.ProgressPercentage,
+                                string.Format("{0}: baixando do site oficial — {1}%",
+                                    alvo.Nome, e.ProgressPercentage));
+                    };
+                    wc.DownloadFileCompleted += delegate(object s, AsyncCompletedEventArgs e)
+                    {
+                        falhaDownload = e.Error;
+                        pronto.Set();
+                    };
+                    wc.DownloadFileAsync(new Uri(m.Alvo), arquivo);
+                    pronto.WaitOne();
+                }
+
+                // Sem esta conferencia, um download que falhou (404, queda de
+                // rede) seguiria para o msiexec com um arquivo invalido.
+                if (falhaDownload != null)
+                {
+                    motivo = "falha no download do instalador oficial (" + falhaDownload.Message + ")";
+                    log(alvo.Nome + ": " + motivo);
+                    return;
+                }
+                long tamanho = File.Exists(arquivo) ? new FileInfo(arquivo).Length : 0;
+                if (tamanho < 100000)
+                {
+                    motivo = string.Format("o instalador baixado tem só {0} bytes — descartado", tamanho);
+                    log(alvo.Nome + ": " + motivo);
+                    return;
+                }
+                log(string.Format("{0}: baixado ({1:N0} MB).", alvo.Nome, tamanho / 1048576));
+                if (progresso != null)
+                    progresso(100, alvo.Nome + ": instalando em silêncio...");
+
+                ResultadoExec r;
+                if (Extensao(m.Alvo).Equals(".msi", StringComparison.OrdinalIgnoreCase))
+                {
+                    log(alvo.Nome + ": instalando pelo MSI oficial, em silêncio...");
+                    r = Executor.Rodar("msiexec.exe", "/i \"" + arquivo + "\" /qn /norestart");
+                }
+                else
+                {
+                    log(alvo.Nome + ": executando o instalador oficial em silêncio...");
+                    r = Executor.Rodar(arquivo, m.Args == null ? "" : m.Args);
+                }
+                // 3010 = instalou, pede reinicializacao depois
+                if (r.Codigo == 0 || r.Codigo == 3010)
+                    log(alvo.Nome + ": instalador oficial concluído.");
+                else
+                {
+                    motivo = "o instalador oficial retornou " + r.Codigo;
+                    log(alvo.Nome + ": " + motivo + ".");
+                }
+            }
+            catch (Exception ex)
+            {
+                motivo = "falha no instalador oficial (" + ex.Message + ")";
+                log(alvo.Nome + ": " + motivo);
+            }
+            finally
+            {
+                try { if (arquivo != null && File.Exists(arquivo)) File.Delete(arquivo); }
+                catch { }
+            }
+        }
+
+        void PorOfficeDeploymentTool(Action<string> log, Action<int, string> progresso, out string motivo)
+        {
+            var office = new InstaladorOffice();
+            AppInstalado r = office.Instalar(log, progresso == null
+                ? delegate(int p, string d) { }
+                : progresso);
+            motivo = r.Versao == null ? r.Status : null;
+        }
+
+        // Alguns enderecos "latest" nao trazem a extensao no caminho; nesses
+        // casos o instalador e .exe.
+        static string Extensao(string url)
+        {
+            try
+            {
+                string ext = Path.GetExtension(new Uri(url).AbsolutePath);
+                if (!string.IsNullOrEmpty(ext) &&
+                    (ext.Equals(".msi", StringComparison.OrdinalIgnoreCase) ||
+                     ext.Equals(".exe", StringComparison.OrdinalIgnoreCase)))
+                    return ext;
+            }
+            catch { }
+            return ".exe";
         }
 
         static bool FalhaDeHash(ResultadoExec r, string motivo)
@@ -219,19 +429,8 @@ namespace AutoInstall
                 log("winget: liberada a permissão para ignorar hash desatualizado de manifesto.");
             else
                 log(string.Format("winget: não consegui liberar essa permissão (0x{0:X8}) — " +
-                    "seguindo para o instalador do fabricante.", r.Codigo));
+                    "seguindo para a via seguinte.", r.Codigo));
             return hashLiberado;
-        }
-
-        ResultadoExec Tentar(ProgramaAlvo alvo, string extras, Action<string> log,
-            Action<int> progresso, out string motivo)
-        {
-            var parse = new ParseWinget(log, progresso);
-            var r = Executor.Rodar(winget,
-                "install --id " + alvo.Id + " -e --silent" + ARGS_COMUNS + extras,
-                Encoding.UTF8, parse.Linha);
-            motivo = parse.UltimaMensagem;
-            return r;
         }
 
         static bool SemAtualizacao(ResultadoExec r)
@@ -241,97 +440,71 @@ namespace AutoInstall
             return s.Contains("already installed") || s.Contains("já está instalado");
         }
 
-        // Ultimo recurso: baixa o instalador do site do proprio fabricante.
-        void InstalarReserva(ProgramaAlvo alvo, Action<string> log, Action<int> progresso)
+        // ------------------------------------------------------------------
+        // Conferencia: a maquina e que diz se o programa esta instalado
+        // ------------------------------------------------------------------
+
+        // Devolve a versao encontrada, "?" quando esta instalado mas sem versao
+        // legivel, ou null quando nao esta instalado.
+        public string Conferir(AppCatalogo alvo)
         {
-            string arquivo = null;
-            try
+            foreach (MetodoInstalacao m in alvo.Metodos)
             {
-                log(alvo.Nome + ": baixando o instalador oficial do fabricante...");
-                ServicePointManager.SecurityProtocol =
-                    ServicePointManager.SecurityProtocol | SecurityProtocolType.Tls12;
-                string ext = Path.GetExtension(new Uri(alvo.UrlReserva).AbsolutePath);
-                if (string.IsNullOrEmpty(ext)) ext = ".exe";
-                arquivo = Path.Combine(Path.GetTempPath(), "slt-reserva" + ext);
-
-                Exception falhaDownload = null;
-                using (var wc = new WebClient())
-                using (var pronto = new ManualResetEvent(false))
+                if (m.Via == Via.ODT)
                 {
-                    wc.DownloadProgressChanged += delegate(object s, DownloadProgressChangedEventArgs e)
-                    {
-                        if (progresso != null) progresso(e.ProgressPercentage);
-                    };
-                    wc.DownloadFileCompleted += delegate(object s, AsyncCompletedEventArgs e)
-                    {
-                        falhaDownload = e.Error;
-                        pronto.Set();
-                    };
-                    wc.DownloadFileAsync(new Uri(alvo.UrlReserva), arquivo);
-                    pronto.WaitOne();
+                    string v = InstaladorOffice.VersaoInstalada();
+                    if (v != null) return v;
+                    continue;
                 }
-
-                // Sem esta conferencia, um download que falhou (404, queda de
-                // rede) seguiria para o msiexec com um arquivo invalido.
-                if (falhaDownload != null)
+                // O "winget list" enxerga tanto os pacotes do winget quanto os
+                // da Microsoft Store, pelo mesmo id usado na instalacao.
+                if (m.Via == Via.Winget || m.Via == Via.MSStore)
                 {
-                    log(alvo.Nome + ": falha no download do instalador oficial — " + falhaDownload.Message);
-                    return;
+                    string v = ObterVersao(m.Alvo);
+                    if (v != null) return v;
                 }
-                long tamanho = File.Exists(arquivo) ? new FileInfo(arquivo).Length : 0;
-                if (tamanho < 100000)
-                {
-                    log(string.Format("{0}: o instalador baixado tem só {1} bytes — descartado.",
-                        alvo.Nome, tamanho));
-                    return;
-                }
-                log(string.Format("{0}: baixado ({1:N0} MB).", alvo.Nome, tamanho / 1048576));
-
-                ResultadoExec r;
-                if (ext.Equals(".msi", StringComparison.OrdinalIgnoreCase))
-                {
-                    log(alvo.Nome + ": instalando pelo MSI oficial, em silêncio...");
-                    r = Executor.Rodar("msiexec.exe", "/i \"" + arquivo + "\" /qn /norestart");
-                }
-                else
-                {
-                    log(alvo.Nome + ": executando o instalador oficial...");
-                    r = Executor.Rodar(arquivo, alvo.ArgsReserva ?? "");
-                }
-                // 3010 = instalou, pede reinicializacao depois
-                if (r.Codigo == 0 || r.Codigo == 3010)
-                    log(alvo.Nome + ": instalador oficial concluído.");
-                else
-                    log(string.Format("{0}: instalador oficial retornou {1}.", alvo.Nome, r.Codigo));
             }
-            catch (Exception ex)
-            {
-                log(alvo.Nome + ": falha no instalador de reserva — " + ex.Message);
-            }
-            finally
-            {
-                try { if (arquivo != null && File.Exists(arquivo)) File.Delete(arquivo); }
-                catch { }
-            }
+            // Vias sem id de pacote (script e instalador oficial) so podem ser
+            // conferidas pelo id do winget, se o app tiver um.
+            return null;
         }
 
+        // Le a versao na saida de "winget list --id X -e". Quando o nome do
+        // pacote e comprido, o winget quebra a linha e a versao cai na linha
+        // de baixo — por isso a continuacao.
         public string ObterVersao(string id)
         {
-            if (winget == null) return null;
+            if (winget == null || string.IsNullOrEmpty(id)) return null;
             var r = Executor.Rodar(winget,
                 "list --id " + id + " -e --accept-source-agreements --disable-interactivity",
                 Encoding.UTF8, null);
             if (r.Saida == null) return null;
-            foreach (string l in r.Saida.Replace("\r", "\n").Split('\n'))
+
+            string[] linhas = r.Saida.Replace("\r", "\n").Split('\n');
+            for (int i = 0; i < linhas.Length; i++)
             {
-                if (l.IndexOf(id, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                string[] tok = l.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                for (int i = 0; i < tok.Length; i++)
-                    if (string.Equals(tok[i], id, StringComparison.OrdinalIgnoreCase) && i + 1 < tok.Length)
-                        return tok[i + 1];
+                if (linhas[i].IndexOf(id, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                string[] tok = linhas[i].Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int t = 0; t < tok.Length; t++)
+                    if (string.Equals(tok[t], id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (t + 1 < tok.Length) return tok[t + 1];
+                        // Linha quebrada: a versao abre a proxima linha util.
+                        for (int j = i + 1; j < linhas.Length; j++)
+                        {
+                            string[] seg = linhas[j].Split(
+                                new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                            if (seg.Length > 0) return seg[0];
+                        }
+                        return "?";
+                    }
             }
             return null;
         }
+
+        // ------------------------------------------------------------------
+        // Atualizacao geral dos programas de desktop
+        // ------------------------------------------------------------------
 
         // Roda "winget upgrade --all" em passadas repetidas ate nao sobrar
         // atualizacao nenhuma (max. 5). Os apps UWP da Loja sao cobertos pela
@@ -346,7 +519,9 @@ namespace AutoInstall
             {
                 if (controle != null && !controle.Prosseguir()) return;
                 log(string.Format("Passada {0}: winget upgrade --all...", passada));
-                var parse = new ParseWinget(log, progresso);
+                var parse = new ParseWinget(log, progresso == null
+                    ? null
+                    : (Action<int, string>)delegate(int p, string d) { progresso(p); }, null);
                 var r = Executor.Rodar(winget,
                     "upgrade --all --include-unknown --silent" + ARGS_COMUNS,
                     Encoding.UTF8, parse.Linha);
@@ -389,7 +564,8 @@ namespace AutoInstall
                 @"([\d.,]+)\s*(KB|MB|GB)\s*/\s*([\d.,]+)\s*(KB|MB|GB)", RegexOptions.IgnoreCase);
 
             readonly Action<string> log;
-            readonly Action<int> progresso;
+            readonly Action<int, string> progresso;
+            readonly string nome;
             int ultimoPct = -1;
             string ultimaLinha;
 
@@ -398,10 +574,11 @@ namespace AutoInstall
             // qualquer tabela de codigos que eu mantivesse aqui.
             public string UltimaMensagem;
 
-            public ParseWinget(Action<string> log, Action<int> progresso)
+            public ParseWinget(Action<string> log, Action<int, string> progresso, string nome)
             {
                 this.log = log;
                 this.progresso = progresso;
+                this.nome = nome;
             }
 
             public void Linha(string bruta)
@@ -430,7 +607,7 @@ namespace AutoInstall
                 if (pct >= 0 && pct <= 100 && pct != ultimoPct && progresso != null)
                 {
                     ultimoPct = pct;
-                    progresso(pct);
+                    progresso(pct, nome == null ? null : string.Format("{0}: {1}%", nome, pct));
                 }
 
                 if (SoBarraDeProgresso(l)) return;
