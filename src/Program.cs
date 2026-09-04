@@ -22,6 +22,9 @@ namespace AutoInstall
                 if (string.Equals(a, "--preview", StringComparison.OrdinalIgnoreCase)) preview = true;
             }
 
+            // Antes de qualquer tela: em previa nada e lido nem gravado.
+            Estado.ModoPrevia = preview;
+
             bool novaInstancia;
             using (var mutex = new Mutex(true, "SmellsLikeTechAutoInstall", out novaInstancia))
             {

@@ -18,6 +18,24 @@ O técnico escolhe o que deseja executar em uma única tela e o programa cuida d
 - retomada do ponto salvo após o logon;
 - novas rodadas até não restarem atualizações ou atingir o limite de segurança.
 
+### Preparo dos instaladores
+
+Executado antes de qualquer instalação, porque instalador desatualizado é a
+maior causa de falha:
+
+- atualização do winget pela API da Microsoft Store;
+- atualização do cliente da Loja, de que depende a fonte `msstore`;
+- `winget source update` para renovar o catálogo local de manifestos;
+- recarga do PATH do processo a partir do registro;
+- limpeza do cache de instaladores em `%TEMP%\WinGet`.
+
+O catálogo de manifestos é o ponto crítico: quando o fabricante republica o
+instalador, o hash em cache fica defasado e a instalação falha com
+`0x8A150011`. Renovar o catálogo antes resolve a causa; o *fallback* por
+`--ignore-security-hash` continua como segunda linha de defesa.
+
+![Preparo dos instaladores](docs/tela-3-preparo.png)
+
 ### Instalação de programas
 
 Catálogo por categorias com múltiplas estratégias de instalação:
@@ -50,6 +68,10 @@ Escolha
    └── Atualizar programas existentes
              │
              ▼
+    preparo dos instaladores
+   (quando há algo a instalar)
+             │
+             ▼
        execução automática
              │
        reinicia se necessário
@@ -62,7 +84,7 @@ Escolha
 
 | Execução | Relatório |
 | --- | --- |
-| ![Progresso](docs/tela-3-progresso.png) | ![Relatório](docs/tela-4-relatorio.png) |
+| ![Progresso](docs/tela-4-progresso.png) | ![Relatório](docs/tela-5-relatorio.png) |
 
 ## Algumas decisões técnicas
 
@@ -95,9 +117,13 @@ O projeto utiliza o compilador do .NET Framework presente no Windows e gera um e
 ```text
 AutoInstall.exe
 AutoInstall.exe --resume
+AutoInstall.exe --preview
 ```
 
 `--resume` é usado pela retomada automática após reinicialização.
+
+`--preview` demonstra as telas com dados fictícios. Não lê nem grava o estado
+salvo, o log ou qualquer configuração da máquina.
 
 ## Autor
 

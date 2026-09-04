@@ -7,6 +7,7 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using Microsoft.Win32;
 
 namespace AutoInstall
 {
@@ -116,6 +117,221 @@ namespace AutoInstall
         {
             ServicePointManager.SecurityProtocol =
                 ServicePointManager.SecurityProtocol | SecurityProtocolType.Tls12;
+        }
+
+        // ------------------------------------------------------------------
+        // Etapa 0: por os PROPRIOS instaladores em dia
+        // ------------------------------------------------------------------
+
+        // Instalador desatualizado e a maior causa de falha na instalacao dos
+        // programas. Sao tres coisas velhas diferentes, e cada uma quebra de um
+        // jeito:
+        //
+        //   1. O winget em si. Versao antiga nao entende manifestos novos e
+        //      falha em pacotes que funcionam em qualquer maquina em dia.
+        //   2. O cliente da Loja. Desatualizado, derruba a fonte msstore
+        //      inteira - e com ela todo app que so existe como pacote da Loja.
+        //   3. O CATALOGO local de manifestos. Este e o mais traicoeiro: o
+        //      winget guarda um indice em cache e, quando o fabricante
+        //      republica o instalador, o hash do manifesto em cache fica
+        //      velho e a instalacao morre em 0x8A150011. O app ja sabia se
+        //      recuperar disso repetindo com --ignore-security-hash; agora
+        //      ataca a causa, baixando o indice novo antes de comecar.
+        //
+        // Roda antes da instalacao dos programas E antes da atualizacao geral,
+        // uma unica vez por execucao.
+        public void Preparar(Estado estado, Action<string> log, Action<int, string> progresso,
+            ControleExecucao controle)
+        {
+            Prog(progresso, 5, "Procurando o winget nesta máquina...");
+            Garantir(log);
+            string antes = VersaoWinget();
+            if (antes != null) estado.Preparo.Add("winget encontrado na versão " + antes + ".");
+
+            // 1) winget e cliente da Loja, pela API da Loja - ela nao depende
+            //    de nenhum dos dois estar funcionando.
+            Prog(progresso, 12, "Atualizando o App Installer e a Microsoft Store...");
+            var loja = new LojaAppInstaller();
+            loja.AoLogar = log;
+            loja.AoProgredir = delegate(int pct, string detalhe)
+            {
+                Prog(progresso, 12 + pct * 33 / 100, detalhe);
+            };
+            bool lojaOk = loja.Atualizar(controle);
+            if (lojaOk)
+                estado.Preparo.Add(loja.Atualizados == 0
+                    ? "App Installer e Microsoft Store já estavam em dia."
+                    : string.Format("{0} instalador(es) atualizado(s) pela Loja{1}.",
+                        loja.Atualizados, loja.Erros > 0 ? ", " + loja.Erros + " com erro" : ""));
+            else
+                estado.Preparo.Add("Não consegui atualizar os instaladores pela Loja.");
+
+            if (controle != null && !controle.Prosseguir()) return;
+
+            // 2) Segunda via para o proprio winget, caso a Loja nao tenha dado
+            //    conta. 0x8A15002B aqui e boa noticia: ja esta na ultima.
+            if (winget != null)
+            {
+                Prog(progresso, 48, "Conferindo a versão do winget...");
+                var r = Executor.Rodar(winget,
+                    "upgrade --id Microsoft.AppInstaller -e --silent" + ARGS_COMUNS,
+                    Encoding.UTF8, null);
+                if (r.Codigo == 0) log("winget: pacote do App Installer atualizado.");
+            }
+
+            // 3) O PATH do processo e de quando o programa abriu. Um App
+            //    Installer recem-instalado publica o winget.exe num caminho
+            //    novo, que so aparece relendo o ambiente do registro.
+            Prog(progresso, 58, "Recarregando o ambiente...");
+            RecarregarAmbiente(log);
+            winget = Localizar();
+            string depois = VersaoWinget();
+            if (depois != null && antes != null && depois != antes)
+            {
+                log(string.Format("winget atualizado: {0} → {1}.", antes, depois));
+                estado.Preparo.Add(string.Format("winget atualizado: {0} → {1}.", antes, depois));
+            }
+            else if (depois != null && antes == null)
+            {
+                log("winget instalado nesta máquina: versão " + depois + ".");
+                estado.Preparo.Add("winget instalado: versão " + depois + ".");
+            }
+
+            if (winget == null)
+            {
+                log("AVISO: winget continua indisponível — as instalações vão usar só as vias alternativas.");
+                estado.Preparo.Add("winget indisponível: só as vias alternativas foram usadas.");
+                estado.Salvar();
+                Prog(progresso, 100, "");
+                return;
+            }
+
+            if (controle != null && !controle.Prosseguir()) return;
+
+            // 4) Cache de instaladores baixados. Cresce sem limite (centenas de
+            //    MB em maquina usada) e guarda versoes velhas dos pacotes.
+            Prog(progresso, 70, "Limpando o cache de instaladores...");
+            LimparCache(estado, log);
+
+            // 5) O indice de manifestos - o item 3 da explicacao la em cima.
+            Prog(progresso, 82, "Baixando os catálogos de pacotes mais recentes...");
+            AtualizarFontes(estado, log);
+
+            estado.Salvar();
+            Prog(progresso, 100, "Instaladores prontos.");
+        }
+
+        static void Prog(Action<int, string> progresso, int pct, string detalhe)
+        {
+            if (progresso != null) progresso(pct, detalhe);
+        }
+
+        string VersaoWinget()
+        {
+            if (winget == null) return null;
+            var r = Executor.Rodar(winget, "--version");
+            if (!r.Ok || r.Saida == null) return null;
+            string v = r.Saida.Trim();
+            return v.Length == 0 ? null : v;
+        }
+
+        // Rele o PATH do registro (maquina + usuario) e aplica no processo.
+        // Sem isto, um instalador que acabou de acrescentar sua pasta ao PATH
+        // so seria encontrado na proxima vez que o programa abrisse.
+        static void RecarregarAmbiente(Action<string> log)
+        {
+            try
+            {
+                string maquina = Registry.GetValue(
+                    @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+                    "Path", "") as string;
+                string usuario = Registry.GetValue(@"HKEY_CURRENT_USER\Environment", "Path", "") as string;
+                string novo = ((maquina ?? "") + ";" + (usuario ?? "")).Trim(';');
+                if (novo.Length > 0)
+                    Environment.SetEnvironmentVariable("PATH", Environment.ExpandEnvironmentVariables(novo));
+            }
+            catch (Exception ex)
+            {
+                log("Aviso: não consegui recarregar o PATH do processo — " + ex.Message);
+            }
+        }
+
+        void LimparCache(Estado estado, Action<string> log)
+        {
+            try
+            {
+                string pasta = Path.Combine(Path.GetTempPath(), "WinGet");
+                if (!Directory.Exists(pasta)) return;
+                long bytes = 0;
+                try
+                {
+                    foreach (string f in Directory.GetFiles(pasta, "*", SearchOption.AllDirectories))
+                        bytes += new FileInfo(f).Length;
+                }
+                catch { }
+                // Arquivo travado por outro processo e ignorado de proposito:
+                // limpar o cache e higiene, nao pre-requisito.
+                ApagarOQuePuder(pasta);
+                if (bytes > 0)
+                {
+                    string m = string.Format("Cache de instaladores limpo ({0:N0} MB).", bytes / 1048576);
+                    log(m);
+                    estado.Preparo.Add(m);
+                }
+            }
+            catch (Exception ex)
+            {
+                log("Aviso: não consegui limpar o cache do winget — " + ex.Message);
+            }
+        }
+
+        static void ApagarOQuePuder(string pasta)
+        {
+            foreach (string f in Directory.GetFiles(pasta))
+            {
+                try { File.Delete(f); }
+                catch { }
+            }
+            foreach (string d in Directory.GetDirectories(pasta))
+            {
+                ApagarOQuePuder(d);
+                try { Directory.Delete(d); }
+                catch { }
+            }
+        }
+
+        void AtualizarFontes(Estado estado, Action<string> log)
+        {
+            log("Atualizando os catálogos de pacotes (winget e Microsoft Store)...");
+            var r = Executor.Rodar(winget, "source update --disable-interactivity",
+                Encoding.UTF8, delegate(string l)
+                {
+                    string t = l.Trim();
+                    if (t.Length > 0) log("    " + t);
+                });
+            if (r.Ok)
+            {
+                log("Catálogos atualizados — os manifestos agora são os mais recentes.");
+                estado.Preparo.Add("Catálogos de pacotes atualizados.");
+                return;
+            }
+
+            // Indice corrompido: reconstroi as fontes padrao do zero. So neste
+            // caso, porque o reset apaga tambem qualquer fonte que o tecnico
+            // tenha acrescentado a mao na maquina.
+            log(string.Format("Falha ao atualizar os catálogos (0x{0:X8}); reconstruindo as fontes...", r.Codigo));
+            Executor.Rodar(winget, "source reset --force --disable-interactivity", Encoding.UTF8, null);
+            var r2 = Executor.Rodar(winget, "source update --disable-interactivity", Encoding.UTF8, null);
+            if (r2.Ok)
+            {
+                log("Fontes reconstruídas e catálogos atualizados.");
+                estado.Preparo.Add("Fontes do winget reconstruídas e catálogos atualizados.");
+            }
+            else
+            {
+                log("Não consegui atualizar os catálogos; sigo com o que está em cache.");
+                estado.Preparo.Add("Catálogos não puderam ser atualizados (segui com o cache local).");
+            }
         }
 
         // ------------------------------------------------------------------

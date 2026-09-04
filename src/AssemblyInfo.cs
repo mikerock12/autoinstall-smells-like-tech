@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 // Um binario SEM esses dados e um dos sinais de maior peso nos motores
 // heuristicos do Windows Defender e do SmartScreen.
 [assembly: AssemblyTitle("AutoInstall Smells Like Tech")]
-[assembly: AssemblyDescription("Preparação automática de máquinas Windows 10 e 11: o técnico escolhe as etapas em uma tela só — Windows Update completo com reinicializações automáticas, instalação dos programas selecionados de um catálogo por categoria (winget, Microsoft Store, script oficial ou instalador do fabricante) e atualização geral do que já está instalado, incluindo os apps da Microsoft Store.")]
+[assembly: AssemblyDescription("Preparação automática de máquinas Windows 10 e 11: o técnico escolhe as etapas em uma tela só — Windows Update completo com reinicializações automáticas, preparo dos próprios instaladores (winget, cliente da Loja e catálogos de pacotes) antes de qualquer instalação, instalação dos programas selecionados de um catálogo por categoria (winget, Microsoft Store, script oficial ou instalador do fabricante) e atualização geral do que já está instalado, incluindo os apps da Microsoft Store.")]
 [assembly: AssemblyProduct("AutoInstall Smells Like Tech")]
 [assembly: AssemblyCompany("Smells Like Tech Informática")]
 [assembly: AssemblyCopyright("Copyright (C) 2026 Maicon Nunes - Smells Like Tech Informática")]
@@ -14,7 +14,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("Release")]
 [assembly: AssemblyCulture("")]
 
-[assembly: AssemblyVersion("2.0.0.0")]
-[assembly: AssemblyFileVersion("2.0.0.0")]
+[assembly: AssemblyVersion("2.1.0.0")]
+[assembly: AssemblyFileVersion("2.1.0.0")]
 
 [assembly: ComVisible(false)]

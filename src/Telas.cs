@@ -473,6 +473,14 @@ namespace AutoInstall
                 sb.AppendLine();
             }
 
+            if (e.Preparo.Count > 0)
+            {
+                sb.AppendLine("== PREPARO DOS INSTALADORES ==");
+                foreach (string x in e.Preparo)
+                    sb.AppendLine("  • " + x);
+                sb.AppendLine();
+            }
+
             if (e.FazerInstalacao && e.Escolhidos.Count > 0)
             {
                 sb.AppendLine("== PROGRAMAS ==");

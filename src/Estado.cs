@@ -30,6 +30,13 @@ namespace AutoInstall
         // torto (o da versao 1 nao tinha escolha nenhuma salva).
         public const int VERSAO_ATUAL = 2;
 
+        // --preview promete nao mexer em nada. Isso vale tambem para o estado
+        // salvo e para o log: ligado este modo, Carregar() devolve sempre um
+        // estado limpo e Salvar()/LogArquivo() nao escrevem. Sem isso a
+        // "previa" mostrava o relatorio de uma execucao real que estivesse
+        // salva na maquina, em vez de demonstrar as telas.
+        public static bool ModoPrevia;
+
         public int Versao { get; set; }
         public string Fase { get; set; }
         public int Reinicios { get; set; }
@@ -40,6 +47,7 @@ namespace AutoInstall
         public List<RodadaUpdates> Rodadas { get; set; }
         public List<AppInstalado> Apps { get; set; }
         public List<string> Upgrades { get; set; }
+        public List<string> Preparo { get; set; }   // etapa 0: instaladores em dia
         public string InicioEm { get; set; }
 
         // --- Escolhas da primeira tela ---
@@ -61,6 +69,7 @@ namespace AutoInstall
             Rodadas = new List<RodadaUpdates>();
             Apps = new List<AppInstalado>();
             Upgrades = new List<string>();
+            Preparo = new List<string>();
             Escolhidos = new List<string>();
         }
 
@@ -80,7 +89,7 @@ namespace AutoInstall
         {
             try
             {
-                if (File.Exists(Arquivo))
+                if (!ModoPrevia && File.Exists(Arquivo))
                 {
                     var js = new JavaScriptSerializer();
                     var e = js.Deserialize<Estado>(File.ReadAllText(Arquivo));
@@ -89,6 +98,7 @@ namespace AutoInstall
                         if (e.Rodadas == null) e.Rodadas = new List<RodadaUpdates>();
                         if (e.Apps == null) e.Apps = new List<AppInstalado>();
                         if (e.Upgrades == null) e.Upgrades = new List<string>();
+                        if (e.Preparo == null) e.Preparo = new List<string>();
                         if (e.Escolhidos == null) e.Escolhidos = new List<string>();
                         if (string.IsNullOrEmpty(e.Fase)) e.Fase = "selecao";
                         return e;
@@ -105,6 +115,7 @@ namespace AutoInstall
 
         public void Salvar()
         {
+            if (ModoPrevia) return;
             try
             {
                 Versao = VERSAO_ATUAL;
@@ -118,12 +129,14 @@ namespace AutoInstall
         // recomecar do zero na proxima execucao.
         public static void Apagar()
         {
+            if (ModoPrevia) return;
             try { if (File.Exists(Arquivo)) File.Delete(Arquivo); }
             catch { }
         }
 
         public static void LogArquivo(string linha)
         {
+            if (ModoPrevia) return;
             try
             {
                 Directory.CreateDirectory(Pasta);

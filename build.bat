@@ -41,6 +41,7 @@ if not exist bin mkdir bin
   /win32icon:icon.ico ^
   /resource:assets\guaxinim.png,guaxinim.png ^
   /resource:tools\loja-update.ps1,loja-update.ps1 ^
+  /resource:tools\preparar-instaladores.ps1,preparar-instaladores.ps1 ^
   /link:lib\Interop.WUApiLib.dll ^
   /r:System.Core.dll ^
   /r:System.Web.Extensions.dll ^

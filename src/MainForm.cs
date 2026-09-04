@@ -14,13 +14,17 @@ namespace AutoInstall
     {
         // Ordem fixa das etapas. Quais delas entram na fila depende do que foi
         // marcado na primeira tela — ver Habilitada().
-        static readonly string[] ORDEM = new string[] { "energia", "updates", "apps", "upgrade", "fim" };
+        static readonly string[] ORDEM = new string[]
+            { "energia", "updates", "instaladores", "apps", "upgrade", "fim" };
 
         readonly bool retomada;
         readonly bool preview;
 
         Estado estado;
         ControleExecucao controle;
+        // Uma instancia so para as tres fases que mexem com pacotes: ela
+        // guarda onde o winget esta e o que ja foi preparado.
+        InstaladorApps instalador;
         bool jaInterrompeu;
         Panel conteudo;
         TelaSelecao telaSelecao;
@@ -139,7 +143,7 @@ namespace AutoInstall
             telaSelecao.Aplicar(estado);
             estado.InicioEm = DateTime.Now.ToString("dd/MM/yyyy HH:mm");
             estado.Fase = "energia";
-            if (!preview) estado.Salvar();
+            estado.Salvar();   // inofensivo em --preview (Estado.ModoPrevia)
 
             Estado.LogArquivo(string.Format(
                 "Escolhas: Windows Update={0}, programas={1} ({2} marcados), atualização geral={3}",
@@ -208,7 +212,16 @@ namespace AutoInstall
             if (fase == "updates") return estado.FazerWindowsUpdate;
             if (fase == "apps") return estado.FazerInstalacao && estado.Escolhidos.Count > 0;
             if (fase == "upgrade") return estado.FazerAtualizacaoGeral;
+            // O preparo dos instaladores so faz sentido se alguma etapa depois
+            // dele for usar winget, Loja ou script de fabricante.
+            if (fase == "instaladores") return Habilitada("apps") || Habilitada("upgrade");
             return true;   // energia e fim sempre acontecem
+        }
+
+        InstaladorApps Instalador()
+        {
+            if (instalador == null) instalador = new InstaladorApps();
+            return instalador;
         }
 
         // Proxima etapa marcada depois desta — as desmarcadas sao puladas.
@@ -261,6 +274,13 @@ namespace AutoInstall
                     // Volta false quando o computador vai reiniciar: a sequencia
                     // continua sozinha depois do logon.
                     if (!await FaseUpdates(log)) return;
+                }
+                else if (estado.Fase == "instaladores")
+                {
+                    await FasePreparar(log);
+                    if (controle.Parando) return;
+                    estado.Fase = Depois("instaladores");
+                    estado.Salvar();
                 }
                 else if (estado.Fase == "apps")
                 {
@@ -392,6 +412,27 @@ namespace AutoInstall
             return false;
         }
 
+        // Etapa 0 das instalacoes: por o winget, o cliente da Loja e os
+        // catalogos de manifestos em dia. Instalador velho e catalogo velho
+        // sao a maior causa de falha na hora de instalar os programas.
+        async Task FasePreparar(Action<string> log)
+        {
+            telaProg.Fase("Preparando os instaladores");
+            telaProg.Contagens("winget · Microsoft Store · catálogos de pacotes");
+            telaProg.Etapa("Deixando os próprios instaladores atualizados antes de instalar qualquer coisa...");
+            telaProg.Progresso(0, "");
+
+            InstaladorApps inst = Instalador();
+            await Task.Run(delegate
+            {
+                inst.Preparar(estado, log, delegate(int pct, string detalhe)
+                {
+                    telaProg.Progresso(pct, detalhe);
+                }, controle);
+            });
+            telaProg.Progresso(100, "Instaladores prontos.");
+        }
+
         async Task FaseApps(Action<string> log)
         {
             List<AppCatalogo> lista = Catalogo.Resolver(estado.Escolhidos);
@@ -400,9 +441,12 @@ namespace AutoInstall
                 lista.Count));
             telaProg.Progresso(0, "");
 
-            var instalador = new InstaladorApps();
-            telaProg.Etapa("Verificando o winget (Windows Package Manager)...");
-            await Task.Run(delegate { return instalador.Garantir(log); });
+            InstaladorApps instalador = Instalador();
+            if (!instalador.TemWinget)
+            {
+                telaProg.Etapa("Verificando o winget (Windows Package Manager)...");
+                await Task.Run(delegate { return instalador.Garantir(log); });
+            }
 
             // Um app ja registrado numa passagem anterior (antes de um reinicio,
             // por exemplo) nao e reinstalado.
@@ -465,8 +509,10 @@ namespace AutoInstall
             telaProg.Etapa("Rodando a atualização geral do winget (repete até não sobrar nada)...");
             telaProg.Progresso(0, "");
 
-            var instalador = new InstaladorApps();
-            bool temWinget = await Task.Run(delegate { return instalador.Garantir(log); });
+            InstaladorApps instalador = Instalador();
+            bool temWinget = instalador.TemWinget;
+            if (!temWinget)
+                temWinget = await Task.Run(delegate { return instalador.Garantir(log); });
             if (temWinget)
             {
                 await Task.Run(delegate
@@ -531,6 +577,24 @@ namespace AutoInstall
         // Modo --preview: so demonstra as telas com dados ficticios.
         async Task FluxoPreview()
         {
+            telaProg.Fase("Preparando os instaladores (PRÉVIA)");
+            telaProg.Contagens("winget · Microsoft Store · catálogos de pacotes");
+            telaProg.Etapa("Deixando os próprios instaladores atualizados... (simulação)");
+            string[] passos = new string[]
+            {
+                "Procurando o winget nesta máquina...",
+                "Atualizando o App Installer e a Microsoft Store...",
+                "Recarregando o ambiente...",
+                "Limpando o cache de instaladores...",
+                "Baixando os catálogos de pacotes mais recentes..."
+            };
+            for (int p = 0; p <= 100; p += 4)
+            {
+                telaProg.Progresso(p, passos[Math.Min(passos.Length - 1, p / 21)]);
+                await Task.Delay(20);
+            }
+            telaProg.Log("Catálogos atualizados — os manifestos agora são os mais recentes. (simulação)");
+
             telaProg.Fase("Windows Update — verificação 1 (PRÉVIA)");
             telaProg.Contagens("Atualizações encontradas: 7   ·   Opcionais/drivers: 3");
             telaProg.Etapa("Baixando 7 atualização(ões)... (simulação — nada é executado)");
@@ -576,6 +640,10 @@ namespace AutoInstall
                 fake.Apps.Add(app);
                 n++;
             }
+            fake.Preparo.Add("winget encontrado na versão v1.29.290.");
+            fake.Preparo.Add("1 instalador(es) atualizado(s) pela Loja.");
+            fake.Preparo.Add("Cache de instaladores limpo (718 MB).");
+            fake.Preparo.Add("Catálogos de pacotes atualizados.");
             fake.Upgrades.Add("Microsoft Store: 10 de 10 app(s) atualizado(s).");
             fake.Upgrades.Add("Passada 1 concluída (código 0).");
             fake.Upgrades.Add("Verificação final: nenhum aplicativo pendente.");

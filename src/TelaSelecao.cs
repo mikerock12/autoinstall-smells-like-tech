@@ -79,8 +79,8 @@ namespace AutoInstall
             };
 
             cartaoApps = new CartaoEtapa("2", "Instalar programas",
-                "Escolha abaixo o que esta máquina precisa. Cada programa é instalado na versão mais " +
-                "recente, em silêncio, e conferido no sistema depois — o código de saída não basta.");
+                "Escolha abaixo o que esta máquina precisa. Antes de instalar, o winget, a Loja e os " +
+                "catálogos de pacotes são atualizados — instalador velho é a maior causa de falha.");
             cartaoApps.SemBorda = true;
             cartaoApps.Marcado = true;
             cartaoApps.SetBounds(1, 1, LARGURA - 2, 84);
