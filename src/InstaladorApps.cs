@@ -7,7 +7,6 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using Microsoft.Win32;
 
 namespace AutoInstall
 {
@@ -148,8 +147,11 @@ namespace AutoInstall
             string antes = VersaoWinget();
             if (antes != null) estado.Preparo.Add("winget encontrado na versão " + antes + ".");
 
+            if (controle != null && !controle.Prosseguir()) return;
+
             // 1) winget e cliente da Loja, pela API da Loja - ela nao depende
-            //    de nenhum dos dois estar funcionando.
+            //    de nenhum dos dois estar funcionando. E o passo mais demorado
+            //    da etapa, entao o ponto de checagem vem antes dele.
             Prog(progresso, 12, "Atualizando o App Installer e a Microsoft Store...");
             var loja = new LojaAppInstaller();
             loja.AoLogar = log;
@@ -179,11 +181,13 @@ namespace AutoInstall
                 if (r.Codigo == 0) log("winget: pacote do App Installer atualizado.");
             }
 
-            // 3) O PATH do processo e de quando o programa abriu. Um App
-            //    Installer recem-instalado publica o winget.exe num caminho
-            //    novo, que so aparece relendo o ambiente do registro.
-            Prog(progresso, 58, "Recarregando o ambiente...");
-            RecarregarAmbiente(log);
+            // 3) Reencontra o winget: o pacote acabou de ser trocado por
+            //    baixo. Nao ha PATH a recarregar - o alias do App Installer
+            //    fica sempre no mesmo lugar
+            //    (%LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe) e
+            //    Localizar() o acha por caminho absoluto, sem depender do
+            //    ambiente do processo.
+            Prog(progresso, 58, "Reconferindo o winget...");
             winget = Localizar();
             string depois = VersaoWinget();
             if (depois != null && antes != null && depois != antes)
@@ -208,8 +212,12 @@ namespace AutoInstall
 
             if (controle != null && !controle.Prosseguir()) return;
 
-            // 4) Cache de instaladores baixados. Cresce sem limite (centenas de
-            //    MB em maquina usada) e guarda versoes velhas dos pacotes.
+            // 4) Faxina de disco, nao parte da correcao: aqui ficam os
+            //    INSTALADORES ja baixados, nao os manifestos. O indice de
+            //    manifestos - a causa do hash velho - mora no LocalState do
+            //    pacote do App Installer e quem renova e o passo 5. Esta
+            //    pasta so cresce (centenas de MB em maquina usada); o custo
+            //    de limpar e rebaixar o que fosse reaproveitado.
             Prog(progresso, 70, "Limpando o cache de instaladores...");
             LimparCache(estado, log);
 
@@ -235,27 +243,6 @@ namespace AutoInstall
             return v.Length == 0 ? null : v;
         }
 
-        // Rele o PATH do registro (maquina + usuario) e aplica no processo.
-        // Sem isto, um instalador que acabou de acrescentar sua pasta ao PATH
-        // so seria encontrado na proxima vez que o programa abrisse.
-        static void RecarregarAmbiente(Action<string> log)
-        {
-            try
-            {
-                string maquina = Registry.GetValue(
-                    @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
-                    "Path", "") as string;
-                string usuario = Registry.GetValue(@"HKEY_CURRENT_USER\Environment", "Path", "") as string;
-                string novo = ((maquina ?? "") + ";" + (usuario ?? "")).Trim(';');
-                if (novo.Length > 0)
-                    Environment.SetEnvironmentVariable("PATH", Environment.ExpandEnvironmentVariables(novo));
-            }
-            catch (Exception ex)
-            {
-                log("Aviso: não consegui recarregar o PATH do processo — " + ex.Message);
-            }
-        }
-
         void LimparCache(Estado estado, Action<string> log)
         {
             try
@@ -272,7 +259,9 @@ namespace AutoInstall
                 // Arquivo travado por outro processo e ignorado de proposito:
                 // limpar o cache e higiene, nao pre-requisito.
                 ApagarOQuePuder(pasta);
-                if (bytes > 0)
+                // Abaixo de 1 MB nao vale linha no relatorio - e o caso de
+                // uma maquina recem-formatada, onde ainda nao ha cache nenhum.
+                if (bytes >= 1048576)
                 {
                     string m = string.Format("Cache de instaladores limpo ({0:N0} MB).", bytes / 1048576);
                     log(m);
