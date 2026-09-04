@@ -29,6 +29,7 @@ namespace AutoInstall
         readonly CartaoEtapa cartaoUpdate;
         readonly CartaoEtapa cartaoApps;
         readonly CartaoEtapa cartaoUpgrade;
+        readonly CartaoEtapa cartaoOusado;
         readonly Panel painelApps;
         readonly PainelRolagem rolagem;
         readonly Label lblResumo;
@@ -100,6 +101,17 @@ namespace AutoInstall
             cartaoUpgrade.SetBounds(0, painelApps.Bottom + 12, LARGURA, 84);
             cartaoUpgrade.AoMudar += delegate { AtualizarResumo(); };
             rolagem.Controls.Add(cartaoUpgrade);
+
+            // ---- Como a máquina fica no fim (não é uma etapa de trabalho,
+            //      por isso sem número e fora da numeração acima) ----
+            cartaoOusado = new CartaoEtapa("", "Sou ousado",
+                "Ao terminar, deixa o plano de energia no desempenho máximo — nada desliga, suspende " +
+                "ou hiberna — e o protetor de tela Faixas em " + ProtetorTela.MINUTOS +
+                " min, que preserva o monitor. Desmarcado, aplica o plano Equilibrado (padrão).");
+            cartaoOusado.Marcado = true;
+            cartaoOusado.SetBounds(0, cartaoUpgrade.Bottom + 12, LARGURA, 90);
+            cartaoOusado.AoMudar += delegate { AtualizarResumo(); };
+            rolagem.Controls.Add(cartaoOusado);
 
             // ---- Barra de baixo: resumo e o botão que começa tudo ----
             lblResumo = new Label();
@@ -244,6 +256,10 @@ namespace AutoInstall
             if (n > 0) partes.Add(n == 1 ? "1 programa" : n + " programas");
             if (cartaoUpgrade.Marcado) partes.Add("atualização geral");
 
+            string fim = cartaoOusado.Marcado
+                ? "   Ao fim: desempenho máximo + protetor de tela."
+                : "   Ao fim: plano Equilibrado (padrão).";
+
             if (partes.Count == 0)
             {
                 lblResumo.Text = "Nada marcado — escolha pelo menos uma etapa acima.";
@@ -253,7 +269,8 @@ namespace AutoInstall
                 btnIniciar.ForeColor = Tema.TextoSuave;
                 return;
             }
-            lblResumo.Text = "Vai executar: " + string.Join("  ·  ", partes.ToArray()) + ".";
+            lblResumo.Text = "Vai executar: " + string.Join("  ·  ", partes.ToArray()) + "." +
+                Environment.NewLine + fim;
             lblResumo.ForeColor = Tema.TextoSuave;
             btnIniciar.Enabled = true;
             btnIniciar.BackColor = Tema.Laranja;
@@ -267,6 +284,7 @@ namespace AutoInstall
             e.FazerWindowsUpdate = cartaoUpdate.Marcado;
             e.FazerInstalacao = cartaoApps.Marcado;
             e.FazerAtualizacaoGeral = cartaoUpgrade.Marcado;
+            e.ModoOusado = cartaoOusado.Marcado;
             e.Escolhidos = new List<string>();
             if (cartaoApps.Marcado)
                 foreach (ItemPrograma i in itens)
@@ -280,6 +298,7 @@ namespace AutoInstall
             if (!e.Configurado) return;
             cartaoUpdate.Marcado = e.FazerWindowsUpdate;
             cartaoUpgrade.Marcado = e.FazerAtualizacaoGeral;
+            cartaoOusado.Marcado = e.ModoOusado;
             foreach (ItemPrograma i in itens)
                 i.DefinirSemAvisar(e.Escolhidos.Contains(i.App.Chave));
             cartaoApps.Marcado = e.FazerInstalacao;

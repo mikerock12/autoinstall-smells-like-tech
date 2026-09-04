@@ -508,11 +508,27 @@ namespace AutoInstall
                 sb.AppendLine();
             }
 
-            sb.AppendLine("== ENERGIA ==");
+            sb.AppendLine("== ENERGIA E TELA ==");
             sb.AppendLine("  • Durante o processo: desempenho máximo, tela/discos sempre ligados,");
             sb.AppendLine("    sem suspender e sem hibernar.");
-            sb.AppendLine("  • Ao final: plano Equilibrado (recomendado) restaurado e o plano");
-            sb.AppendLine("    temporário removido.");
+            if (e.ModoOusado)
+            {
+                sb.AppendLine("  • Ao final (modo \"Sou ousado\"): o plano de desempenho máximo FICA na");
+                sb.AppendLine("    máquina - nada desliga, suspende ou hiberna.");
+                sb.AppendLine(e.ProtetorConfigurado
+                    ? string.Format("  • Protetor de tela {0} configurado para {1} minutos, que preserva",
+                          ProtetorTela.NOME, ProtetorTela.MINUTOS)
+                    : "  • ATENÇÃO: não consegui configurar o protetor de tela. Com a tela sempre");
+                sb.AppendLine(e.ProtetorConfigurado
+                    ? "    o monitor durante a ociosidade."
+                    : "    ligada, configure um protetor de tela à mão.");
+                sb.AppendLine("  • Para voltar ao normal: Configurações > Sistema > Energia.");
+            }
+            else
+            {
+                sb.AppendLine("  • Ao final: plano Equilibrado (recomendado) restaurado e o plano");
+                sb.AppendLine("    temporário removido.");
+            }
             sb.AppendLine();
             sb.AppendLine("Obrigado por usar o AutoInstall Smells Like Tech!");
             sb.AppendLine("www.smellsliketech.com.br  ·  instagram.com/smellsliketechinfo");

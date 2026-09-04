@@ -13,6 +13,14 @@ namespace AutoInstall
         const string GUID_ALTO = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";          // Alto Desempenho
         const string GUID_EQUILIBRADO = "381b4222-f694-41f0-9685-ff5bb260df2e";   // Equilibrado (recomendado)
 
+        // Tudo em 0 = nunca desligar, na tomada e na bateria.
+        static readonly string[] AJUSTES_SEM_DESLIGAR = {
+            "/change monitor-timeout-ac 0",   "/change monitor-timeout-dc 0",
+            "/change disk-timeout-ac 0",      "/change disk-timeout-dc 0",
+            "/change standby-timeout-ac 0",   "/change standby-timeout-dc 0",
+            "/change hibernate-timeout-ac 0", "/change hibernate-timeout-dc 0"
+        };
+
         static readonly Regex RxGuid = new Regex(
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
 
@@ -46,14 +54,28 @@ namespace AutoInstall
                 log("Aviso: não consegui duplicar um plano de alto desempenho; ajustando o plano atual.");
             }
 
-            string[] ajustes = {
-                "/change monitor-timeout-ac 0",   "/change monitor-timeout-dc 0",
-                "/change disk-timeout-ac 0",      "/change disk-timeout-dc 0",
-                "/change standby-timeout-ac 0",   "/change standby-timeout-dc 0",
-                "/change hibernate-timeout-ac 0", "/change hibernate-timeout-dc 0"
-            };
-            foreach (string a in ajustes) Executor.Rodar("powercfg.exe", a);
+            foreach (string a in AJUSTES_SEM_DESLIGAR) Executor.Rodar("powercfg.exe", a);
             log("Tela, discos, suspensão e hibernação configurados para NUNCA desligar (temporário).");
+        }
+
+        // Modo "Sou ousado": o plano de desempenho maximo FICA na maquina.
+        // O plano temporario perde o "(temporario)" do nome, os timeouts sao
+        // reforcados (o Windows Update mexe neles ao longo do processo) e nada
+        // e apagado.
+        public static void ManterMaximo(Estado estado, Action<string> log)
+        {
+            if (!string.IsNullOrEmpty(estado.PlanoUltra))
+            {
+                Executor.Rodar("powercfg.exe", "/changename " + estado.PlanoUltra +
+                    " \"Smells Like Tech - Desempenho Total\"" +
+                    " \"Plano de desempenho máximo aplicado pelo AutoInstall: tela, discos," +
+                    " suspensão e hibernação nunca desligam. Trocar em Opções de Energia.\"");
+                // Os /change abaixo valem para o plano ATIVO: garante que e ele.
+                Executor.Rodar("powercfg.exe", "/setactive " + estado.PlanoUltra);
+            }
+
+            foreach (string a in AJUSTES_SEM_DESLIGAR) Executor.Rodar("powercfg.exe", a);
+            log("Plano de energia de desempenho máximo mantido: nada desliga, suspende ou hiberna.");
         }
 
         public static void Restaurar(Estado estado, Action<string> log)

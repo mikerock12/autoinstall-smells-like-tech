@@ -58,6 +58,10 @@ namespace AutoInstall
         public bool FazerInstalacao { get; set; }
         public bool FazerAtualizacaoGeral { get; set; }
         public List<string> Escolhidos { get; set; } // chaves do Catalogo
+        // "Sou ousado": ao terminar, mantem o desempenho maximo e configura o
+        // protetor de tela. Desmarcado, volta ao plano Equilibrado.
+        public bool ModoOusado { get; set; }
+        public bool ProtetorConfigurado { get; set; }   // so para o relatorio
 
         // Versao NAO e preenchida aqui de proposito. O JavaScriptSerializer
         // instancia pelo construtor e so sobrescreve os campos presentes no

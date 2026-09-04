@@ -146,9 +146,10 @@ namespace AutoInstall
             estado.Salvar();   // inofensivo em --preview (Estado.ModoPrevia)
 
             Estado.LogArquivo(string.Format(
-                "Escolhas: Windows Update={0}, programas={1} ({2} marcados), atualização geral={3}",
+                "Escolhas: Windows Update={0}, programas={1} ({2} marcados), " +
+                "atualização geral={3}, modo ousado={4}",
                 estado.FazerWindowsUpdate, estado.FazerInstalacao,
-                estado.Escolhidos.Count, estado.FazerAtualizacaoGeral));
+                estado.Escolhidos.Count, estado.FazerAtualizacaoGeral, estado.ModoOusado));
 
             Mostrar(telaProg);
             await Rodar();
@@ -195,6 +196,7 @@ namespace AutoInstall
             estado.FazerInstalacao = anterior.FazerInstalacao;
             estado.FazerAtualizacaoGeral = anterior.FazerAtualizacaoGeral;
             estado.Escolhidos = new List<string>(anterior.Escolhidos);
+            estado.ModoOusado = anterior.ModoOusado;
             estado.Configurado = anterior.Configurado;
 
             telaProg.Limpar();
@@ -534,8 +536,10 @@ namespace AutoInstall
         async Task Finalizar(Action<string> log)
         {
             telaProg.Fase("Finalizando");
-            telaProg.Etapa("Restaurando o plano de energia recomendado...");
-            await Task.Run(delegate { Energia.Restaurar(estado, log); });
+            telaProg.Etapa(estado.ModoOusado
+                ? "Mantendo o desempenho máximo e configurando o protetor de tela..."
+                : "Restaurando o plano de energia recomendado...");
+            await Task.Run(delegate { AplicarEnergiaFinal(log); });
             TarefaInicio.Remover();
             estado.Fase = "concluido";
             estado.Salvar();
@@ -553,11 +557,28 @@ namespace AutoInstall
             telaProg.Etapa("Restaurando o plano de energia e encerrando com segurança...");
             estado.Interrompido = true;
             estado.Salvar();
-            await Task.Run(delegate { Energia.Restaurar(estado, telaProg.Log); });
+            // Vale a escolha do tecnico tambem aqui: parar no meio nao e
+            // motivo para devolver a maquina a um modo que ele nao pediu.
+            await Task.Run(delegate { AplicarEnergiaFinal(telaProg.Log); });
             TarefaInicio.Remover();
             estado.Fase = "concluido";
             estado.Salvar();
             MostrarFinal();
+        }
+
+        // O que fica na maquina depois que tudo termina - inclusive quando o
+        // tecnico manda parar no meio.
+        void AplicarEnergiaFinal(Action<string> log)
+        {
+            if (estado.ModoOusado)
+            {
+                Energia.ManterMaximo(estado, log);
+                estado.ProtetorConfigurado = ProtetorTela.Configurar(log);
+            }
+            else
+            {
+                Energia.Restaurar(estado, log);
+            }
         }
 
         void ReiniciarAgora()
@@ -620,6 +641,8 @@ namespace AutoInstall
             fake.FazerInstalacao = estado.FazerInstalacao;
             fake.FazerAtualizacaoGeral = estado.FazerAtualizacaoGeral;
             fake.Escolhidos = new List<string>(estado.Escolhidos);
+            fake.ModoOusado = estado.ModoOusado;
+            fake.ProtetorConfigurado = estado.ModoOusado;
 
             var rodada = new RodadaUpdates();
             rodada.Numero = 1;

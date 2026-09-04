@@ -54,6 +54,24 @@ A instalação é validada pelo estado real do sistema, e não apenas pelo códi
 - atualizações dos aplicativos da Microsoft Store;
 - múltiplas passadas quando necessário.
 
+### Como a máquina fica no fim
+
+Opção **"Sou ousado"**, marcada por padrão:
+
+| | Marcado | Desmarcado |
+| --- | --- | --- |
+| Plano de energia | Desempenho máximo permanente: nada desliga, suspende ou hiberna | Equilibrado (padrão do Windows) |
+| Protetor de tela | Faixas em 15 minutos | não altera |
+
+O protetor existe por causa do plano: com a tela ligada para sempre, imagem
+parada por horas marca o monitor. Ele resolve isso sem devolver a máquina ao
+modo que desliga e suspende tudo.
+
+A configuração do protetor é gravada no perfil de quem executou **e** nos
+perfis reais carregados em `HKEY_USERS`. O programa roda elevado; quando a
+elevação vem de uma conta de administrador diferente da que usa o computador,
+só o `HKEY_CURRENT_USER` não bastaria.
+
 ## Stack
 
 C# · .NET Framework · WinForms · Windows Update COM API · winget · Microsoft Store API · PowerShell
@@ -65,7 +83,8 @@ Escolha
    │
    ├── Windows Update
    ├── Instalar programas
-   └── Atualizar programas existentes
+   ├── Atualizar programas existentes
+   └── Sou ousado (como a máquina fica no fim)
              │
              ▼
     preparo dos instaladores
@@ -77,6 +96,9 @@ Escolha
        reinicia se necessário
              │
        retoma do estado salvo
+             │
+             ▼
+    energia e protetor de tela
              │
              ▼
           relatório

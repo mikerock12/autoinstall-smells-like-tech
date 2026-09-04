@@ -155,11 +155,14 @@ namespace AutoInstall
 
             DesenharCaixa(g, 24, 21, 22);
 
-            Texto(g, numero + ". " + titulo, FonteTitulo,
+            Texto(g, string.IsNullOrEmpty(numero) ? titulo : numero + ". " + titulo, FonteTitulo,
                 Marcado ? Tema.Texto : Tema.TextoSuave, new Rectangle(62, 16, Width - 86, 26));
 
+            // Altura do texto acompanha a do cartao: os cartoes de etapa tem
+            // 84 px e duas linhas; um cartao mais alto ganha mais linhas sem
+            // precisar de outra classe.
             TextRenderer.DrawText(g, explicacao, FonteTexto,
-                new Rectangle(62, 42, Width - 86, 34), Tema.TextoSuave,
+                new Rectangle(62, 42, Width - 86, Height - 48), Tema.TextoSuave,
                 TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak | TextFormatFlags.Top);
         }
     }
