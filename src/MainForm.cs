@@ -584,7 +584,7 @@ namespace AutoInstall
             {
                 "Procurando o winget nesta máquina...",
                 "Atualizando o App Installer e a Microsoft Store...",
-                "Recarregando o ambiente...",
+                "Reconferindo o winget...",
                 "Limpando o cache de instaladores...",
                 "Baixando os catálogos de pacotes mais recentes..."
             };
