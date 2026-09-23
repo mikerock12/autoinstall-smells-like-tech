@@ -166,6 +166,12 @@ namespace AutoInstall
             {
                 await FluxoReal();
             }
+            catch (WindowsUpdateEmAndamentoException ex)
+            {
+                AvisarUpdate(ex.Message, telaProg.Log);
+                telaProg.Suspender("Windows Update ainda em andamento",
+                    "Estado salvo. Confira o Windows Update e retome após a operação terminar.");
+            }
             catch (Exception ex)
             {
                 telaProg.Log("ERRO INESPERADO: " + ex.Message);
@@ -316,12 +322,14 @@ namespace AutoInstall
         async Task<bool> FaseUpdates(Action<string> log)
         {
             var atualizador = new AtualizadorWindows();
+            atualizador.AoLogar = log;
+            atualizador.AoAguardar = telaProg.Contagens;
             int rodada = estado.Rodadas.Count + 1;
             telaProg.Fase(string.Format("Windows Update — verificação {0}", rodada));
 
-            if (estado.Reinicios >= 8)
+            if (estado.Reinicios >= 8 || estado.Rodadas.Count >= 8)
             {
-                log("Limite de reinicializações atingido; seguindo para a próxima etapa.");
+                AvisarUpdate("Limite de 8 rodadas/reinicializações atingido; podem restar atualizações pendentes.", log);
                 estado.Fase = Depois("updates");
                 estado.Salvar();
                 return true;
@@ -332,19 +340,10 @@ namespace AutoInstall
             telaProg.Progresso(0, "");
 
             ResultadoBusca busca = null;
-            for (int tentativa = 1; tentativa <= 3; tentativa++)
+            if (!await TentarUpdate(delegate
+                { return Task.Run(delegate { busca = atualizador.Buscar(controle); }); }, "Busca", log))
             {
-                Exception falha = null;
-                try { busca = await Task.Run(delegate { return atualizador.Buscar(); }); }
-                catch (Exception ex) { falha = ex; }
-                if (busca != null) break;
-                log(string.Format("Falha ao consultar o Windows Update (tentativa {0}/3): {1}",
-                    tentativa, falha.Message));
-                if (tentativa < 3) await Task.Delay(20000);
-            }
-            if (busca == null)
-            {
-                log("Windows Update inacessível; seguindo para a próxima etapa.");
+                if (controle.Parando) return false;
                 estado.Fase = Depois("updates");
                 estado.Salvar();
                 return true;
@@ -378,23 +377,35 @@ namespace AutoInstall
                 telaProg.Progresso(geral, string.Format("Baixando {0} de {1} ({2}% desta) — {3}",
                     idx, busca.Total, pctItem, Curto(titulo)));
             };
-            await Task.Run(delegate { atualizador.Baixar(busca, controle); });
+            if (!await TentarUpdate(delegate
+                { return Task.Run(delegate { atualizador.Baixar(busca, controle); }); }, "Download", log))
+            {
+                if (controle.Parando) return false;
+                estado.Fase = Depois("updates");
+                estado.Salvar();
+                return true;
+            }
             if (controle.Parando) { await Interromper(); return false; }
-            telaProg.Progresso(100, "Download concluído.");
-            log("Download de todas as atualizações concluído.");
+            string resumoDownload = string.Format("Download: {0} de {1} atualização(ões) prontas para instalar.",
+                busca.Baixados, busca.Total);
+            telaProg.Progresso(busca.Baixados * 100 / busca.Total, resumoDownload);
+            log(resumoDownload);
+            if (busca.Baixados < busca.Total) AvisarUpdate(resumoDownload + " Consulte as falhas por item no relatório.", log);
 
             if (!await Ponto()) return false;
 
             // Instalacao com percentual real (nunca abortada no meio)
-            telaProg.Etapa(string.Format("Instalando {0} atualização(ões)...", busca.Total));
+            telaProg.Etapa(string.Format("Instalando {0} atualização(ões) baixadas...", busca.Baixados));
             telaProg.Progresso(0, "");
             atualizador.AoProgredirInstalacao = delegate(int geral, int idx, int pctItem, string titulo)
             {
                 telaProg.Progresso(geral, string.Format("Instalando {0} de {1} ({2}% desta) — {3}",
                     idx, busca.Total, pctItem, Curto(titulo)));
             };
-            await Task.Run(delegate { atualizador.Instalar(busca); });
-            telaProg.Progresso(100, "Instalação concluída.");
+            if (busca.Baixados > 0)
+                await Task.Run(delegate { atualizador.Instalar(busca, controle); });
+            telaProg.Progresso(busca.Instalados * 100 / busca.Total,
+                string.Format("Instaladas: {0} de {1} atualização(ões).", busca.Instalados, busca.Total));
             log("Instalação desta rodada concluída.");
 
             var registro = new RodadaUpdates();
@@ -403,14 +414,60 @@ namespace AutoInstall
                 registro.Atualizacoes.Add(item.Titulo +
                     (item.Resultado == "ok" ? "" : " [" + item.Resultado + "]"));
             estado.Rodadas.Add(registro);
-            estado.Reinicios++;
             estado.Salvar();
 
             if (controle.Parando) { await Interromper(); return false; }
 
-            TarefaInicio.Criar(log);
-            Mostrar(telaReiniciar);
-            telaReiniciar.Iniciar();
+            if (atualizador.RebootNecessario)
+            {
+                estado.Reinicios++;
+                estado.Salvar();
+                TarefaInicio.Criar(log);
+                Mostrar(telaReiniciar);
+                telaReiniciar.Iniciar();
+                return false;
+            }
+            if (busca.Instalados == 0)
+            {
+                AvisarUpdate("Nenhuma atualização foi instalada nesta rodada; seguindo com pendências registradas.", log);
+                estado.Fase = Depois("updates");
+                estado.Salvar();
+            }
+            // Sem reboot necessario, verifica novamente sem reiniciar a maquina.
+            return true;
+        }
+
+        void AvisarUpdate(string mensagem, Action<string> log)
+        {
+            log(mensagem);
+            estado.AvisosWindowsUpdate.Add(mensagem);
+            estado.Salvar();
+        }
+
+        async Task<bool> TentarUpdate(Func<Task> operacao, string nome, Action<string> log)
+        {
+            for (int tentativa = 1; tentativa <= 3; tentativa++)
+            {
+                if (!await Ponto()) return false;
+                bool cancelado = false;
+                try { await operacao(); return true; }
+                catch (OperationCanceledException) { cancelado = true; }
+                // Nunca sobrepoe uma tentativa cujo cancelamento nao foi confirmado.
+                catch (WindowsUpdateEmAndamentoException) { throw; }
+                catch (Exception ex)
+                {
+                    log(string.Format("{0} do Windows Update, tentativa {1}/3: {2}",
+                        nome, tentativa, AtualizadorWindows.Erro(ex)));
+                }
+                if (cancelado) { controle.Parar(); await Interromper(); return false; }
+                if (tentativa < 3)
+                {
+                    telaProg.Contagens(nome + ": nova tentativa em 20 segundos...");
+                    for (int i = 0; i < 40 && !controle.Parando; i++) await Task.Delay(500);
+                }
+            }
+            if (!await Ponto()) return false;
+            AvisarUpdate(nome + " do Windows Update falhou após 3 tentativas. Há atualizações não verificadas ou pendentes.", log);
             return false;
         }
 

@@ -165,6 +165,19 @@ namespace AutoInstall
             NoUi(delegate { lblContagens.Text = texto; });
         }
 
+        public void Suspender(string fase, string aviso)
+        {
+            NoUi(delegate
+            {
+                lblFase.Text = fase;
+                lblContagens.Text = "As próximas etapas estão suspensas; nenhuma reinicialização foi solicitada.";
+                lblAviso.Text = aviso;
+                lblAviso.ForeColor = Tema.LaranjaClaro;
+                btnPausar.Enabled = false;
+                btnParar.Enabled = false;
+            });
+        }
+
         public void Etapa(string texto)
         {
             Estado.LogArquivo("[etapa] " + texto);
@@ -456,8 +469,10 @@ namespace AutoInstall
             {
                 sb.AppendLine("== ATUALIZAÇÕES DO WINDOWS ==");
                 int total = 0;
+                foreach (string aviso in e.AvisosWindowsUpdate)
+                    sb.AppendLine("  ATENÇÃO: " + aviso);
                 if (e.Rodadas.Count == 0)
-                    sb.AppendLine("  (nenhuma atualização pendente foi encontrada)");
+                    sb.AppendLine("  (nenhuma rodada de instalação registrada)");
                 foreach (var r in e.Rodadas)
                 {
                     sb.AppendLine(string.Format("  Verificação {0} — {1} atualização(ões):",

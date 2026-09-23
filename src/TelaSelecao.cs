@@ -26,6 +26,13 @@ namespace AutoInstall
         const int MARGEM = 32;
         const int LARGURA = 836;   // 920 - margens - espaco da barra de rolagem
 
+        readonly Dictionary<string, Label> titulos = new Dictionary<string, Label>();
+        readonly ToolTip dicas = new ToolTip();
+        TextBox buscaApps;
+        ComboBox filtroCategoria;
+        Label resultadoBusca;
+        int inicioGrade;
+
         readonly CartaoEtapa cartaoUpdate;
         readonly CartaoEtapa cartaoApps;
         readonly CartaoEtapa cartaoUpgrade;
@@ -89,7 +96,8 @@ namespace AutoInstall
             painelApps.Controls.Add(cartaoApps);
 
             int y = MontarAtalhos(painelApps, 90);
-            y = MontarGrade(painelApps, y + 6);
+            inicioGrade = y + 6;
+            y = MontarGrade(painelApps, inicioGrade);
             painelApps.SetBounds(0, 96, LARGURA, y + 14);
             rolagem.Controls.Add(painelApps);
 
@@ -137,7 +145,10 @@ namespace AutoInstall
             };
             Controls.Add(btnIniciar);
 
+            buscaApps.TextChanged += delegate { FiltrarApps(); };
+            filtroCategoria.SelectedIndexChanged += delegate { FiltrarApps(); };
             MarcarRecomendados();
+            FiltrarApps();
         }
 
         // Linha de atalhos da lista de programas.
@@ -147,15 +158,61 @@ namespace AutoInstall
             recomendados.Click += delegate { MarcarRecomendados(); };
             dono.Controls.Add(recomendados);
 
-            var todos = Atalho("Todos", 160, y, 94);
-            todos.Click += delegate { Marcar(delegate(ItemPrograma i) { return true; }); };
+            var todos = Atalho("Todos visíveis", 160, y, 118);
+            todos.Click += delegate { MarcarVisiveis(true); };
             dono.Controls.Add(todos);
 
-            var limpar = Atalho("Limpar", 262, y, 94);
-            limpar.Click += delegate { Marcar(delegate(ItemPrograma i) { return false; }); };
+            var limpar = Atalho("Limpar visíveis", 286, y, 118);
+            limpar.Click += delegate { MarcarVisiveis(false); };
             dono.Controls.Add(limpar);
 
-            return y + 32;
+            resultadoBusca = new Label();
+            resultadoBusca.Font = new Font("Segoe UI", 9f);
+            resultadoBusca.ForeColor = Tema.TextoSuave;
+            resultadoBusca.TextAlign = ContentAlignment.MiddleRight;
+            resultadoBusca.SetBounds(416, y, 394, 28);
+            dono.Controls.Add(resultadoBusca);
+
+            var lblBusca = new Label();
+            lblBusca.Text = "Buscar aplicativo ou finalidade";
+            lblBusca.ForeColor = Tema.TextoSuave;
+            lblBusca.SetBounds(24, y + 38, 390, 20);
+            dono.Controls.Add(lblBusca);
+            buscaApps = new TextBox();
+            buscaApps.Font = new Font("Segoe UI", 10f);
+            buscaApps.BackColor = Tema.FundoEscuro;
+            buscaApps.ForeColor = Tema.Texto;
+            buscaApps.SetBounds(24, y + 60, 390, 28);
+            buscaApps.AccessibleName = "Buscar aplicativo ou finalidade";
+            dono.Controls.Add(buscaApps);
+
+            var lblCategoria = new Label();
+            lblCategoria.Text = "Categoria";
+            lblCategoria.ForeColor = Tema.TextoSuave;
+            lblCategoria.SetBounds(432, y + 38, 378, 20);
+            dono.Controls.Add(lblCategoria);
+            filtroCategoria = new ComboBox();
+            filtroCategoria.DropDownStyle = ComboBoxStyle.DropDownList;
+            filtroCategoria.Font = new Font("Segoe UI", 10f);
+            filtroCategoria.BackColor = Tema.FundoEscuro;
+            filtroCategoria.ForeColor = Tema.Texto;
+            filtroCategoria.DrawMode = DrawMode.OwnerDrawFixed;
+            filtroCategoria.DrawItem += delegate(object sender, DrawItemEventArgs e)
+            {
+                e.DrawBackground();
+                if (e.Index >= 0)
+                    TextRenderer.DrawText(e.Graphics, (string)filtroCategoria.Items[e.Index],
+                        filtroCategoria.Font, e.Bounds, e.ForeColor,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                e.DrawFocusRectangle();
+            };
+            filtroCategoria.SetBounds(432, y + 60, 378, 28);
+            filtroCategoria.AccessibleName = "Filtrar categoria de aplicativos";
+            filtroCategoria.Items.Add("Todas as categorias");
+            filtroCategoria.Items.AddRange(Catalogo.Categorias);
+            filtroCategoria.SelectedIndex = 0;
+            dono.Controls.Add(filtroCategoria);
+            return y + 94;
         }
 
         static Button Atalho(string texto, int x, int y, int largura)
@@ -196,6 +253,7 @@ namespace AutoInstall
                 titulo.TextAlign = ContentAlignment.BottomLeft;
                 titulo.SetBounds(x[c], y[c], colunaL, 26);
                 dono.Controls.Add(titulo);
+                titulos.Add(categoria, titulo);
                 y[c] += 30;
 
                 foreach (AppCatalogo app in apps)
@@ -204,6 +262,7 @@ namespace AutoInstall
                     item.SetBounds(x[c], y[c], colunaL, 46);
                     item.AoMudar += delegate { AtualizarResumo(); };
                     dono.Controls.Add(item);
+                    dicas.SetToolTip(item, app.Nome + "\n" + app.Descricao + "\nInstalação: " + app.Vias);
                     itens.Add(item);
                     y[c] += 46;
                 }
@@ -215,6 +274,54 @@ namespace AutoInstall
         void MarcarRecomendados()
         {
             Marcar(delegate(ItemPrograma i) { return i.App.Recomendado; });
+        }
+
+        bool Corresponde(ItemPrograma item)
+        {
+            string categoria = filtroCategoria.SelectedIndex > 0 ? (string)filtroCategoria.SelectedItem : null;
+            return Catalogo.Corresponde(item.App, buscaApps.Text, categoria);
+        }
+
+        void MarcarVisiveis(bool marcado)
+        {
+            foreach (ItemPrograma item in itens)
+                if (Corresponde(item)) item.DefinirSemAvisar(marcado);
+            AtualizarResumo();
+        }
+
+        void FiltrarApps()
+        {
+            rolagem.SuspendLayout();
+            painelApps.SuspendLayout();
+            rolagem.AutoScrollPosition = Point.Empty;
+            const int ESQ = 24, GAP = 20;
+            int largura = (LARGURA - 2 - ESQ * 2 - GAP) / 2;
+            int[] alturas = { inicioGrade, inicioGrade };
+            foreach (string categoria in Catalogo.Categorias)
+            {
+                Label titulo = titulos[categoria];
+                var visiveis = itens.FindAll(i => i.App.Categoria == categoria && Corresponde(i));
+                titulo.Visible = visiveis.Count > 0;
+                foreach (ItemPrograma item in itens)
+                    if (item.App.Categoria == categoria) item.Visible = Corresponde(item);
+                if (visiveis.Count == 0) continue;
+                int coluna = alturas[0] <= alturas[1] ? 0 : 1;
+                int x = ESQ + coluna * (largura + GAP);
+                titulo.SetBounds(x, alturas[coluna], largura, 26);
+                alturas[coluna] += 30;
+                foreach (ItemPrograma item in visiveis)
+                {
+                    item.SetBounds(x, alturas[coluna], largura, 46);
+                    alturas[coluna] += 46;
+                }
+                alturas[coluna] += 12;
+            }
+            painelApps.Height = Math.Max(alturas[0], alturas[1]) + 14;
+            cartaoUpgrade.Top = painelApps.Bottom + 12;
+            cartaoOusado.Top = cartaoUpgrade.Bottom + 12;
+            painelApps.ResumeLayout();
+            rolagem.ResumeLayout();
+            AtualizarResumo();
         }
 
         void Marcar(Predicate<ItemPrograma> regra)
@@ -250,6 +357,13 @@ namespace AutoInstall
 
         void AtualizarResumo()
         {
+            if (resultadoBusca != null)
+            {
+                int visiveis = itens.FindAll(Corresponde).Count;
+                resultadoBusca.Text = string.Format("{0} de {1} aplicativos · {2} selecionados",
+                    visiveis, Catalogo.Apps.Length, Escolhidos);
+                if (visiveis == 0) resultadoBusca.Text = "Nenhum resultado · " + Escolhidos + " selecionados";
+            }
             var partes = new List<string>();
             if (cartaoUpdate.Marcado) partes.Add("Windows Update completo");
             int n = Escolhidos;
@@ -303,6 +417,12 @@ namespace AutoInstall
                 i.DefinirSemAvisar(e.Escolhidos.Contains(i.App.Chave));
             cartaoApps.Marcado = e.FazerInstalacao;
             AlternarLista();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) dicas.Dispose();
+            base.Dispose(disposing);
         }
     }
 }

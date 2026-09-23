@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
+using System.Runtime.InteropServices;
 using WUApiLib;
 
 namespace AutoInstall
@@ -10,7 +10,8 @@ namespace AutoInstall
         public string Titulo;
         public bool Opcional;
         public bool Driver;
-        public bool Interativa;   // declara que PODE pedir interacao
+        public bool Interativa;
+        public bool Baixado;
         public string Resultado;
     }
 
@@ -22,87 +23,88 @@ namespace AutoInstall
         public int Drivers;
         public int Interativas;
         public int Total { get { return Itens.Count; } }
+        public int Baixados { get { return Itens.FindAll(i => i.Baixado).Count; } }
+        public int Instalados { get { return Itens.FindAll(i => i.Resultado == "ok" || i.Resultado == "ok com avisos").Count; } }
     }
 
-    // Windows Update via COM (wuapi.dll), com progresso real de download e
-    // instalacao atraves dos callbacks BeginDownload/BeginInstall.
     public class AtualizadorWindows
     {
-        // (percentualGeral, indiceAtual 1-based, percentualDoItem, tituloDoItem)
         public Action<int, int, int, string> AoProgredirDownload;
         public Action<int, int, int, string> AoProgredirInstalacao;
-
+        public Action<string> AoLogar;
+        public Action<string> AoAguardar;
         public bool RebootNecessario;
-
         IUpdateSession3 sessao;
+
+        void Log(string mensagem) { if (AoLogar != null) AoLogar(mensagem); }
+        void Status(string mensagem)
+        {
+            Log(mensagem);
+            if (AoAguardar != null) AoAguardar(mensagem);
+        }
 
         IUpdateSession3 ObterSessao()
         {
-            if (sessao == null)
+            if (sessao != null) return sessao;
+            Log("Inicializando o agente do Windows Update...");
+            sessao = (IUpdateSession3)Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.Session"));
+            sessao.ClientApplicationID = "SmellsLikeTech AutoInstall";
+            try
             {
-                sessao = (IUpdateSession3)Activator.CreateInstance(
-                    Type.GetTypeFromProgID("Microsoft.Update.Session"));
-                sessao.ClientApplicationID = "SmellsLikeTech AutoInstall";
-
-                // Opt-in no Microsoft Update (alem do Windows Update, traz
-                // atualizacoes do Office e de outros produtos Microsoft).
-                try
-                {
-                    var usm = (IUpdateServiceManager2)Activator.CreateInstance(
-                        Type.GetTypeFromProgID("Microsoft.Update.ServiceManager"));
-                    usm.ClientApplicationID = "SmellsLikeTech AutoInstall";
-                    usm.AddService2("7971f918-a847-4430-9279-4a52d1efe18d", 7, "");
-                }
-                catch { }
+                var usm = (IUpdateServiceManager2)Activator.CreateInstance(
+                    Type.GetTypeFromProgID("Microsoft.Update.ServiceManager"));
+                usm.ClientApplicationID = "SmellsLikeTech AutoInstall";
+                // 1 (pending) + 4 (AU): nao faz o registro ONLINE sincrono (2),
+                // que podia bloquear antes mesmo de iniciar a busca monitorada.
+                usm.AddService2("7971f918-a847-4430-9279-4a52d1efe18d", 5, "");
             }
+            catch (Exception ex) { Log("Microsoft Update: " + Erro(ex)); }
             return sessao;
         }
 
-        // Procura tudo que esta pendente, incluindo opcionais e drivers.
-        public ResultadoBusca Buscar()
+        public static string Erro(Exception ex)
         {
-            IUpdateSession3 s = ObterSessao();
-            IUpdateSearcher buscador = s.CreateUpdateSearcher();
+            return ex.Message + string.Format(" (0x{0:X8})", ex.HResult);
+        }
+
+        public ResultadoBusca Buscar(ControleExecucao controle)
+        {
+            if (controle != null && !controle.Prosseguir()) throw new OperationCanceledException();
+            IUpdateSearcher buscador = ObterSessao().CreateUpdateSearcher();
             buscador.Online = true;
-            ISearchResult resultado = buscador.Search("IsInstalled=0 and IsHidden=0");
+            Log("Busca assíncrona iniciada (limite: 10 minutos por tentativa).");
+            ISearchJob job = buscador.BeginSearch("IsInstalled=0 and IsHidden=0", new CallbackFim(), null);
+            ISearchResult resultado;
+            try
+            {
+                Esperar(delegate { return job.IsCompleted; }, null, job.RequestAbort, controle,
+                    TimeSpan.FromMinutes(10));
+                resultado = buscador.EndSearch(job);
+            }
+            finally { LimparSeConcluido(delegate { return job.IsCompleted; }, job.CleanUp); }
+
+            if (resultado.ResultCode != OperationResultCode.orcSucceeded)
+                throw new InvalidOperationException("Busca incompleta: " + resultado.ResultCode +
+                    ". O resultado não será tratado como Windows atualizado.");
 
             var rb = new ResultadoBusca();
-            rb.Colecao = (UpdateCollection)Activator.CreateInstance(
-                Type.GetTypeFromProgID("Microsoft.Update.UpdateColl"));
-
+            rb.Colecao = NovaColecao();
             var encontrados = resultado.Updates;
             for (int i = 0; i < encontrados.Count; i++)
             {
+                if (controle != null && controle.Parando) throw new OperationCanceledException();
                 IUpdate u = encontrados[i];
-
-                bool driver = false;
-                try { driver = ((int)u.Type == 2); } catch { }    // 2 = utDriver
-
+                bool driver = u.Type == UpdateType.utDriver;
                 bool opcional = driver;
                 var u3 = u as IUpdate3;
-                if (u3 != null)
-                {
-                    try { if (u3.BrowseOnly) opcional = true; }
-                    catch { }
-                }
-
-                // CanRequestUserInput NAO e motivo para pular: drivers quase
-                // sempre se declaram assim e instalam silenciosamente numa
-                // boa. A instalacao roda com ForceQuiet, que suprime qualquer
-                // pedido de interacao; se alguma realmente nao puder instalar
-                // sem usuario, falha sozinha e fica registrada no relatorio.
+                if (u3 != null) { try { if (u3.BrowseOnly) opcional = true; } catch { } }
                 bool interativa = false;
                 try { interativa = u.InstallationBehavior.CanRequestUserInput; } catch { }
-
-                try { if (!u.EulaAccepted) u.AcceptEula(); } catch { }
-
+                try { if (!u.EulaAccepted) u.AcceptEula(); }
+                catch (Exception ex) { Log("Não foi possível aceitar a licença de " + u.Title + ": " + Erro(ex)); }
                 rb.Colecao.Add(u);
-                var item = new ItemUpdate();
-                item.Titulo = u.Title;
-                item.Opcional = opcional;
-                item.Driver = driver;
-                item.Interativa = interativa;
-                rb.Itens.Add(item);
+                rb.Itens.Add(new ItemUpdate { Titulo = u.Title, Opcional = opcional,
+                    Driver = driver, Interativa = interativa });
                 if (opcional) rb.Opcionais++;
                 if (driver) rb.Drivers++;
                 if (interativa) rb.Interativas++;
@@ -110,202 +112,170 @@ namespace AutoInstall
             return rb;
         }
 
-        // Download pode ser abortado com seguranca (o que ja veio fica em cache
-        // e o proximo ciclo aproveita). A INSTALACAO nunca e abortada: parar no
-        // meio de uma atualizacao e a receita para um Windows quebrado.
         public void Baixar(ResultadoBusca busca, ControleExecucao controle)
         {
-            IUpdateSession3 s = ObterSessao();
-            IUpdateDownloader dl = s.CreateUpdateDownloader();
+            if (controle != null && !controle.Prosseguir()) throw new OperationCanceledException();
+            IUpdateDownloader dl = ObterSessao().CreateUpdateDownloader();
             dl.Updates = busca.Colecao;
-            try { dl.Priority = (DownloadPriority)3; } catch { }   // dpHigh
-            using (var fim = new ManualResetEvent(false))
+            try { dl.Priority = DownloadPriority.dpHigh; } catch { }
+            IDownloadJob job = dl.BeginDownload(new CallbackDownload(), new CallbackFim(), null);
+            IDownloadResult resultado;
+            try
             {
-                IDownloadJob job = dl.BeginDownload(
-                    new CbDownloadProgresso(this, busca), new CbDownloadFim(fim), null);
-                while (!fim.WaitOne(500))
+                Esperar(delegate { return job.IsCompleted; }, delegate
                 {
-                    if (controle == null || !controle.Parando) continue;
-                    try { job.RequestAbort(); }
-                    catch { }
-                    fim.WaitOne(20000);
-                    break;
-                }
-                try { dl.EndDownload(job); }
-                catch { }
+                    IDownloadProgress p = job.GetProgress();
+                    int idx = p.CurrentUpdateIndex;
+                    if (AoProgredirDownload != null)
+                        AoProgredirDownload(p.PercentComplete, idx + 1, p.CurrentUpdatePercentComplete,
+                            idx >= 0 && idx < busca.Total ? busca.Itens[idx].Titulo : "");
+                    // Bytes contam como atividade mesmo quando a porcentagem nao muda.
+                    return p.TotalBytesDownloaded + ":" + idx + ":" + p.CurrentUpdateDownloadPhase;
+                }, job.RequestAbort, controle, TimeSpan.FromMinutes(15));
+                resultado = dl.EndDownload(job);
+            }
+            finally { LimparSeConcluido(delegate { return job.IsCompleted; }, job.CleanUp); }
+
+            Log("Resultado do download: " + resultado.ResultCode + string.Format(" (0x{0:X8}).", resultado.HResult));
+            for (int i = 0; i < busca.Total; i++)
+            {
+                var r = resultado.GetUpdateResult(i);
+                var item = busca.Itens[i];
+                item.Baixado = busca.Colecao[i].IsDownloaded;
+                item.Resultado = item.Baixado ? null : string.Format(
+                    "download falhou: {0} (0x{1:X8})", r.ResultCode, r.HResult);
+                if (!item.Baixado) Log(item.Titulo + " — " + item.Resultado);
             }
         }
 
-        public void Instalar(ResultadoBusca busca)
+        public void Instalar(ResultadoBusca busca, ControleExecucao controle)
         {
             IUpdateSession3 s = ObterSessao();
-            int total = busca.Itens.Count;
+            int total = busca.Total;
             RebootNecessario = false;
-
-            // Atualizacoes com Impact "exclusivo" (ex.: upgrades de versao) so
-            // podem ser instaladas sozinhas: misturadas ao lote, derrubam a
-            // operacao inteira (0x8024000B). Separa: lote normal primeiro,
-            // depois cada exclusiva por vez.
             var lote = new List<int>();
             var exclusivas = new List<int>();
             for (int i = 0; i < total; i++)
             {
-                bool exclusiva = false;
-                try { exclusiva = ((int)busca.Colecao[i].InstallationBehavior.Impact == 2); }
-                catch { }
-                if (exclusiva) exclusivas.Add(i);
+                if (!busca.Itens[i].Baixado) continue;
+                if ((int)busca.Colecao[i].InstallationBehavior.Impact == 2) exclusivas.Add(i);
                 else lote.Add(i);
             }
-
             int concluidas = 0;
             if (lote.Count > 0)
             {
-                InstalarParte(s, busca, lote, concluidas, total);
+                InstalarParte(s, busca, lote, concluidas, total, controle);
                 concluidas += lote.Count;
             }
             foreach (int i in exclusivas)
             {
-                var sozinha = new List<int>();
-                sozinha.Add(i);
-                InstalarParte(s, busca, sozinha, concluidas, total);
+                if (RebootNecessario || (controle != null && !controle.Prosseguir())) break;
+                InstalarParte(s, busca, new List<int> { i }, concluidas, total, controle);
                 concluidas++;
             }
+            foreach (var item in busca.Itens)
+                if (item.Resultado == null) item.Resultado = "pendente (instalação não iniciada)";
         }
 
         void InstalarParte(IUpdateSession3 s, ResultadoBusca busca, List<int> indices,
-            int jaConcluidas, int total)
+            int jaConcluidas, int total, ControleExecucao controle)
         {
+            if (controle != null && !controle.Prosseguir()) return;
             try
             {
-                var col = (UpdateCollection)Activator.CreateInstance(
-                    Type.GetTypeFromProgID("Microsoft.Update.UpdateColl"));
+                var col = NovaColecao();
                 foreach (int i in indices) col.Add(busca.Colecao[i]);
-
                 IUpdateInstaller inst = s.CreateUpdateInstaller();
+                if (inst.IsBusy) throw new WindowsUpdateEmAndamentoException(
+                    "Outra instalação do Windows Update está em andamento. Aguarde sua conclusão antes de retomar.");
+                if (inst.RebootRequiredBeforeInstallation) { RebootNecessario = true; return; }
                 inst.Updates = col;
-                try { inst.AllowSourcePrompts = false; } catch { }
-                // ForceQuiet: instala sem nenhuma interacao, inclusive as
-                // atualizacoes que declaram CanRequestUserInput (drivers).
+                inst.AllowSourcePrompts = false;
                 var inst2 = inst as IUpdateInstaller2;
-                if (inst2 != null)
-                {
-                    try { inst2.ForceQuiet = true; } catch { }
-                }
-
+                if (inst2 != null) inst2.ForceQuiet = true;
+                IInstallationJob job = inst.BeginInstall(new CallbackInstalacao(), new CallbackFim(), null);
                 IInstallationResult resultado;
-                using (var fim = new ManualResetEvent(false))
+                try
                 {
-                    IInstallationJob job = inst.BeginInstall(
-                        new CbInstalacaoProgresso(this, busca, indices, jaConcluidas, total),
-                        new CbInstalacaoFim(fim), null);
-                    fim.WaitOne();
+                    Esperar(delegate { return job.IsCompleted; }, delegate
+                    {
+                        IInstallationProgress p = job.GetProgress();
+                        int k = p.CurrentUpdateIndex;
+                        int original = k >= 0 && k < indices.Count ? indices[k] : indices[0];
+                        int geral = (jaConcluidas * 100 + p.PercentComplete * indices.Count) / total;
+                        if (AoProgredirInstalacao != null)
+                            AoProgredirInstalacao(geral, original + 1, p.CurrentUpdatePercentComplete,
+                                busca.Itens[original].Titulo);
+                        return k + ":" + p.PercentComplete + ":" + p.CurrentUpdatePercentComplete;
+                    }, null, null, TimeSpan.Zero); // Nunca aborta uma instalacao ativa.
                     resultado = inst.EndInstall(job);
                 }
+                finally { LimparSeConcluido(delegate { return job.IsCompleted; }, job.CleanUp); }
 
                 for (int k = 0; k < indices.Count; k++)
                 {
-                    try
-                    {
-                        var r = resultado.GetUpdateResult(k);
-                        int cod = (int)r.ResultCode;               // 2 = ok, 3 = ok com avisos
-                        if (cod == 2) busca.Itens[indices[k]].Resultado = "ok";
-                        else if (cod == 3) busca.Itens[indices[k]].Resultado = "ok com avisos";
-                        else busca.Itens[indices[k]].Resultado = "código " + cod;
-                    }
-                    catch { busca.Itens[indices[k]].Resultado = "?"; }
+                    var r = resultado.GetUpdateResult(k);
+                    busca.Itens[indices[k]].Resultado = r.ResultCode == OperationResultCode.orcSucceeded ? "ok" :
+                        r.ResultCode == OperationResultCode.orcSucceededWithErrors ? "ok com avisos" :
+                        string.Format("instalação falhou: {0} (0x{1:X8})", r.ResultCode, r.HResult);
+                    Log(busca.Itens[indices[k]].Titulo + " — " + busca.Itens[indices[k]].Resultado);
                 }
-
-                try { if (resultado.RebootRequired) RebootNecessario = true; } catch { }
+                if (resultado.RebootRequired) RebootNecessario = true;
             }
+            catch (WindowsUpdateEmAndamentoException) { throw; }
             catch (Exception ex)
             {
-                // Falha desta parte nao derruba as demais; fica no relatorio
-                // e a proxima rodada (pos-reinicio) tenta de novo.
                 foreach (int i in indices)
-                    if (busca.Itens[i].Resultado == null)
-                        busca.Itens[i].Resultado = "falhou (" + ex.Message + ")";
+                    if (busca.Itens[i].Resultado == null) busca.Itens[i].Resultado = "falhou: " + Erro(ex);
+                Log("Falha na instalação: " + Erro(ex));
             }
         }
 
-        // ---- Callbacks COM (chamados pelo agente do Windows Update) ----
-
-        class CbDownloadProgresso : IDownloadProgressChangedCallback
+        void Esperar(Func<bool> concluido, Func<string> progresso, Action abortar,
+            ControleExecucao controle, TimeSpan limite)
         {
-            readonly AtualizadorWindows dono;
-            readonly ResultadoBusca busca;
-            public CbDownloadProgresso(AtualizadorWindows dono, ResultadoBusca busca)
+            try { EsperaWindowsUpdate.Aguardar(concluido, progresso, abortar, controle, limite, Status); }
+            catch (TimeoutException) { throw; }
+            catch (OperationCanceledException) { throw; }
+            catch (WindowsUpdateEmAndamentoException) { throw; }
+            catch (Exception ex)
             {
-                this.dono = dono; this.busca = busca;
-            }
-            public void Invoke(IDownloadJob job, IDownloadProgressChangedCallbackArgs e)
-            {
-                try
-                {
-                    IDownloadProgress p = e.Progress;
-                    int idx = p.CurrentUpdateIndex;
-                    string titulo = (idx >= 0 && idx < busca.Itens.Count) ? busca.Itens[idx].Titulo : "";
-                    var h = dono.AoProgredirDownload;
-                    if (h != null) h(p.PercentComplete, idx + 1, p.CurrentUpdatePercentComplete, titulo);
-                }
-                catch { }
+                // Uma falha de consulta nao prova que o instalador terminou.
+                throw new WindowsUpdateEmAndamentoException("Perdi a comunicação com o Windows Update: " + Erro(ex) +
+                    ". As próximas etapas foram suspensas; o estado foi preservado.");
             }
         }
 
-        class CbDownloadFim : IDownloadCompletedCallback
+        static UpdateCollection NovaColecao()
         {
-            readonly ManualResetEvent ev;
-            public CbDownloadFim(ManualResetEvent ev) { this.ev = ev; }
-            public void Invoke(IDownloadJob job, IDownloadCompletedCallbackArgs e)
-            {
-                try { ev.Set(); } catch { }
-            }
+            return (UpdateCollection)Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.UpdateColl"));
         }
 
-        // A instalacao pode rodar em partes (lote normal + exclusivas): o
-        // callback recebe o mapa de indices da parte atual e o quanto ja foi
-        // concluido antes dela, para o percentual geral cobrir o conjunto todo.
-        class CbInstalacaoProgresso : IInstallationProgressChangedCallback
+        static void LimparSeConcluido(Func<bool> concluido, Action limpar)
         {
-            readonly AtualizadorWindows dono;
-            readonly ResultadoBusca busca;
-            readonly List<int> indices;
-            readonly int jaConcluidas;
-            readonly int total;
-            public CbInstalacaoProgresso(AtualizadorWindows dono, ResultadoBusca busca,
-                List<int> indices, int jaConcluidas, int total)
-            {
-                this.dono = dono;
-                this.busca = busca;
-                this.indices = indices;
-                this.jaConcluidas = jaConcluidas;
-                this.total = total;
-            }
-            public void Invoke(IInstallationJob job, IInstallationProgressChangedCallbackArgs e)
-            {
-                try
-                {
-                    IInstallationProgress p = e.Progress;
-                    int k = p.CurrentUpdateIndex;
-                    int original = (k >= 0 && k < indices.Count) ? indices[k] : 0;
-                    string titulo = (original < busca.Itens.Count) ? busca.Itens[original].Titulo : "";
-                    int geral = total > 0
-                        ? (jaConcluidas * 100 + p.PercentComplete * indices.Count) / total
-                        : p.PercentComplete;
-                    var h = dono.AoProgredirInstalacao;
-                    if (h != null) h(geral, original + 1, p.CurrentUpdatePercentComplete, titulo);
-                }
-                catch { }
-            }
+            // CleanUp tambem espera: chama-lo em job ativo recriaria o travamento.
+            try { if (concluido()) limpar(); } catch { }
         }
 
-        class CbInstalacaoFim : IInstallationCompletedCallback
+        // Callbacks publicos e visiveis ao COM apesar do ComVisible(false) do
+        // assembly. Nao acessam a UI nem seguram referencias ao job. O polling
+        // de IsCompleted/GetProgress funciona mesmo se uma notificacao se perder.
+        [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+        public class CallbackFim : ISearchCompletedCallback, IDownloadCompletedCallback, IInstallationCompletedCallback
         {
-            readonly ManualResetEvent ev;
-            public CbInstalacaoFim(ManualResetEvent ev) { this.ev = ev; }
-            public void Invoke(IInstallationJob job, IInstallationCompletedCallbackArgs e)
-            {
-                try { ev.Set(); } catch { }
-            }
+            public void Invoke(ISearchJob job, ISearchCompletedCallbackArgs e) { }
+            public void Invoke(IDownloadJob job, IDownloadCompletedCallbackArgs e) { }
+            public void Invoke(IInstallationJob job, IInstallationCompletedCallbackArgs e) { }
+        }
+        [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+        public class CallbackDownload : IDownloadProgressChangedCallback
+        {
+            public void Invoke(IDownloadJob job, IDownloadProgressChangedCallbackArgs e) { }
+        }
+        [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+        public class CallbackInstalacao : IInstallationProgressChangedCallback
+        {
+            public void Invoke(IInstallationJob job, IInstallationProgressChangedCallbackArgs e) { }
         }
     }
 }

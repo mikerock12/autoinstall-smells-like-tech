@@ -18,6 +18,20 @@ O técnico escolhe o que deseja executar em uma única tela e o programa cuida d
 - retomada do ponto salvo após o logon;
 - novas rodadas até não restarem atualizações ou atingir o limite de segurança.
 
+A busca é assíncrona, cancelável e tem limite de 10 minutos por tentativa.
+Downloads são cancelados após 15 minutos sem avanço dos bytes recebidos.
+Busca e download têm até três tentativas em caso de exceção ou timeout, sempre
+aguardando a confirmação do cancelamento antes de repetir. A conclusão e o
+progresso são consultados diretamente no agente, sem depender da entrega dos
+callbacks COM. A cada 30 segundos há uma indicação de atividade no log e na tela.
+
+Instalações em andamento são aguardadas sem encerramento forçado. Se o agente
+não confirmar o cancelamento em 60 segundos ou a comunicação com uma operação
+ativa for perdida, as etapas seguintes ficam suspensas e o estado é preservado.
+Falhas entram no relatório; um erro de consulta não significa que o Windows está
+atualizado. Reinícios ocorrem somente quando solicitados pelo agente, com limite
+de oito rodadas/reinicializações.
+
 ### Preparo dos instaladores
 
 Executado antes de qualquer instalação, porque instalador desatualizado é a
@@ -26,7 +40,7 @@ maior causa de falha:
 - atualização do winget pela API da Microsoft Store;
 - atualização do cliente da Loja, de que depende a fonte `msstore`;
 - `winget source update` para renovar o catálogo local de manifestos;
-- recarga do PATH do processo a partir do registro;
+- localização do winget por caminho absoluto, sem substituir o PATH do processo;
 - limpeza do cache de instaladores em `%TEMP%\WinGet`.
 
 O catálogo de manifestos é o ponto crítico: quando o fabricante republica o
@@ -47,6 +61,25 @@ Catálogo por categorias com múltiplas estratégias de instalação:
 - Office Deployment Tool.
 
 A instalação é validada pelo estado real do sistema, e não apenas pelo código de saída do instalador.
+
+São **95 aplicativos em 20 categorias**, com busca por nome, descrição ou
+finalidade (sem distinção de acentos) e filtro por categoria:
+
+- uso geral: navegadores, compactadores, documentos, PDF e digitalização,
+  comunicação, produtividade, nuvem e utilitários;
+- estudantes e pesquisadores: Anki, calibre, Zotero e GeoGebra;
+- criação: imagem, vídeo, música, produção de áudio, 3D, CAD e eletrônica;
+- desenvolvedores e técnicos: desenvolvimento, acesso remoto, redes,
+  diagnóstico e manutenção;
+- outros públicos: jogos, segurança, inteligência artificial e acessibilidade
+  (NVDA e Balabolka).
+
+**Todos visíveis** e **Limpar visíveis** afetam apenas o resultado do filtro;
+escolhas em outras categorias permanecem marcadas. Limpe a busca e selecione
+**Todas as categorias** para aplicar esses botões ao catálogo inteiro.
+**Recomendados** restaura a seleção padrão do catálogo. Os novos aplicativos
+ficam desmarcados por padrão. Contas, licenças e configurações específicas de
+cada aplicativo continuam sendo necessárias quando aplicável.
 
 ### Atualização do software instalado
 
@@ -113,6 +146,9 @@ Escolha
 ### Atualização sem interromper operações críticas
 
 Pausar ou parar é respeitado entre itens. Um instalador em execução não é encerrado abruptamente.
+Na busca e no download do Windows Update, **Parar** solicita cancelamento ao
+agente; a pausa aguarda o fim da operação atual. Entre lotes e atualizações
+exclusivas, ambos os comandos são respeitados antes de iniciar a próxima parte.
 
 ### Persistência entre reinicializações
 
@@ -133,6 +169,24 @@ build.bat
 ```
 
 O projeto utiliza o compilador do .NET Framework presente no Windows e gera um executável para uso em bancada.
+
+### Verificações
+
+```powershell
+.\tools\testar.ps1
+.\tools\testar.ps1 -WindowsUpdateLocal
+.\tools\verificar-catalogo.ps1
+```
+
+O primeiro comando testa as esperas, cancelamentos, catálogo, filtros, seleção
+e compatibilidade do estado salvo; também renderiza a tela em PNG dentro de
+`bin`. O segundo acrescenta uma busca COM somente de leitura no cache local,
+sem downloads, instalações, registro de serviços ou mudanças de energia.
+O terceiro consulta os IDs no repositório oficial `microsoft/winget-pkgs`
+e requer GitHub CLI autenticado e acesso à rede. Existência do manifesto não
+substitui o teste do instalador em cada versão/arquitetura do Windows.
+
+Consulte [o diagnóstico e a validação do Windows Update](docs/windows-update.md).
 
 ## Uso
 

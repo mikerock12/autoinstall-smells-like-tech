@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace AutoInstall
 {
@@ -75,10 +76,10 @@ namespace AutoInstall
         }
     }
 
-    // Catalogo dos programas oferecidos na tela inicial. A regra e "os melhores
-    // de cada categoria", nao "todos": lista curta, escolha rapida.
+    // Catalogo por publico e finalidade. Novas opcoes sao opt-in para nao
+    // transformar "Recomendados" numa instalacao de todos os perfis.
     //
-    // Todo id de winget aqui foi conferido com "winget show --id <id> -e".
+    // IDs conferidos no repositorio oficial microsoft/winget-pkgs.
     // Onde existe um endereco oficial que sempre aponta para a ultima versao,
     // ele entra como metodo de reserva — assim uma falha do winget (manifesto
     // com hash velho, fonte fora do ar) nao derruba a instalacao.
@@ -93,12 +94,25 @@ namespace AutoInstall
         public const string SEGURANCA = "Antivírus e segurança";
         public const string IA = "Inteligência artificial";
         public const string UTILITARIOS = "Utilitários do dia a dia";
+        public const string PDF = "PDF e digitalização";
+        public const string COMUNICACAO = "Comunicação e reuniões";
+        public const string PRODUTIVIDADE = "Organização e produtividade";
+        public const string NUVEM = "Nuvem e sincronização";
+        public const string ESTUDOS = "Estudos e pesquisa";
+        public const string AUDIO = "Música e produção de áudio";
+        public const string MODELAGEM = "3D, CAD e eletrônica";
+        public const string JOGOS = "Jogos e plataformas";
+        public const string SUPORTE = "Acesso remoto e redes";
+        public const string DIAGNOSTICO = "Diagnóstico e manutenção";
+        public const string ACESSIBILIDADE = "Acessibilidade e leitura";
 
         // Ordem em que as categorias aparecem na tela.
         public static readonly string[] Categorias = new string[]
         {
-            NAVEGADORES, COMPACTADORES, TEXTO, DESENVOLVIMENTO,
-            IMAGEM, VIDEO, SEGURANCA, IA, UTILITARIOS
+            NAVEGADORES, COMPACTADORES, TEXTO, PDF, COMUNICACAO,
+            PRODUTIVIDADE, NUVEM, ESTUDOS, DESENVOLVIMENTO, IMAGEM,
+            VIDEO, AUDIO, MODELAGEM, JOGOS, SEGURANCA, IA, SUPORTE,
+            DIAGNOSTICO, ACESSIBILIDADE, UTILITARIOS
         };
 
         static MetodoInstalacao Winget(string id) { return new MetodoInstalacao(Via.Winget, id); }
@@ -158,7 +172,7 @@ namespace AutoInstall
 
             new AppCatalogo("acrobat", "Adobe Acrobat Reader",
                 "O leitor de PDF padrão do mercado, com assinatura digital.",
-                TEXTO, true,
+                PDF, true,
                 Winget("Adobe.Acrobat.Reader.64-bit")),
 
             // ---------------- Desenvolvimento ----------------
@@ -307,7 +321,148 @@ namespace AutoInstall
                 "Cria pendrive bootável de instalação do Windows.",
                 UTILITARIOS, false,
                 Winget("Rufus.Rufus")),
+
+            new AppCatalogo("edge", "Microsoft Edge", "Navegador da Microsoft com perfis e sincronização.",
+                NAVEGADORES, false, Winget("Microsoft.Edge")),
+            new AppCatalogo("vivaldi", "Vivaldi", "Navegador com abas organizáveis e personalização.",
+                NAVEGADORES, false, Winget("Vivaldi.Vivaldi")),
+            new AppCatalogo("peazip", "PeaZip", "Compactação gratuita com criptografia de arquivos.",
+                COMPACTADORES, false, Winget("Giorgiotani.Peazip")),
+            new AppCatalogo("onlyoffice", "ONLYOFFICE Desktop", "Documentos, planilhas e apresentações no desktop.",
+                TEXTO, false, Winget("ONLYOFFICE.DesktopEditors")),
+
+            new AppCatalogo("sumatrapdf", "SumatraPDF", "Leitor leve de PDFs, e-books e quadrinhos.",
+                PDF, false, Winget("SumatraPDF.SumatraPDF")),
+            new AppCatalogo("pdf24", "PDF24 Creator", "Cria, junta, comprime e converte arquivos PDF.",
+                PDF, false, Winget("geeksoftwareGmbH.PDF24Creator")),
+            new AppCatalogo("naps2", "NAPS2", "Digitaliza documentos e reconhece texto com OCR.",
+                PDF, false, Winget("Cyanfish.NAPS2")),
+
+            new AppCatalogo("whatsapp", "WhatsApp", "Mensagens e chamadas; requer conta e vinculação.",
+                COMUNICACAO, false, Loja("9NKSQGP7F2NH")),
+            new AppCatalogo("telegram", "Telegram Desktop", "Mensagens, grupos e canais sincronizados.",
+                COMUNICACAO, false, Winget("Telegram.TelegramDesktop")),
+            new AppCatalogo("signal", "Signal", "Mensagens privadas vinculadas ao seu celular.",
+                COMUNICACAO, false, Winget("OpenWhisperSystems.Signal")),
+            new AppCatalogo("discord", "Discord", "Comunidades, chat e chamadas de voz e vídeo.",
+                COMUNICACAO, false, Winget("Discord.Discord")),
+            new AppCatalogo("zoom", "Zoom Workplace", "Videoconferências para trabalho, aulas e reuniões.",
+                COMUNICACAO, false, Winget("Zoom.Zoom")),
+            new AppCatalogo("teams", "Microsoft Teams", "Reuniões e colaboração; requer conta compatível.",
+                COMUNICACAO, false, Winget("Microsoft.Teams")),
+            new AppCatalogo("thunderbird", "Mozilla Thunderbird", "E-mail, agenda e contatos em um só aplicativo.",
+                COMUNICACAO, false, Winget("Mozilla.Thunderbird")),
+
+            new AppCatalogo("obsidian", "Obsidian", "Notas locais em Markdown com links entre assuntos.",
+                PRODUTIVIDADE, false, Winget("Obsidian.Obsidian")),
+            new AppCatalogo("joplin", "Joplin", "Notas e tarefas com opção de sincronização.",
+                PRODUTIVIDADE, false, Winget("Joplin.Joplin")),
+            new AppCatalogo("notion", "Notion", "Notas, projetos e bases de dados; requer conta.",
+                PRODUTIVIDADE, false, Winget("Notion.Notion")),
+
+            new AppCatalogo("googledrive", "Google Drive", "Sincroniza arquivos do Google; requer conta.",
+                NUVEM, false, Winget("Google.GoogleDrive")),
+            new AppCatalogo("onedrive", "Microsoft OneDrive", "Sincroniza pastas e arquivos com a conta Microsoft.",
+                NUVEM, false, Winget("Microsoft.OneDrive")),
+            new AppCatalogo("dropbox", "Dropbox", "Arquivos na nuvem e compartilhamento; requer conta.",
+                NUVEM, false, Winget("Dropbox.Dropbox")),
+            new AppCatalogo("syncthing", "Syncthing", "Sincroniza pastas entre dispositivos; exige configuração.",
+                NUVEM, false, Winget("Syncthing.Syncthing")),
+
+            new AppCatalogo("anki", "Anki", "Cartões de estudo com revisão espaçada.",
+                ESTUDOS, false, Winget("Anki.Anki")),
+            new AppCatalogo("calibre", "calibre", "Organiza, converte e lê livros digitais.",
+                ESTUDOS, false, Winget("calibre.calibre")),
+            new AppCatalogo("zotero", "Zotero", "Organiza referências, artigos e citações acadêmicas.",
+                ESTUDOS, false, Winget("DigitalScholar.Zotero")),
+            new AppCatalogo("geogebra", "GeoGebra Classic", "Geometria, álgebra e gráficos para aprender matemática.",
+                ESTUDOS, false, Winget("GeoGebra.Classic")),
+
+            new AppCatalogo("githubdesktop", "GitHub Desktop", "Interface gráfica para repositórios Git e GitHub.",
+                DESENVOLVIMENTO, false, Winget("GitHub.GitHubDesktop")),
+            new AppCatalogo("githubcli", "GitHub CLI", "Issues, pull requests e repositórios pelo terminal.",
+                DESENVOLVIMENTO, false, Winget("GitHub.cli")),
+            new AppCatalogo("dbeaver", "DBeaver Community", "Cliente SQL para consultar e administrar bancos.",
+                DESENVOLVIMENTO, false, Winget("DBeaver.DBeaver.Community")),
+            new AppCatalogo("postman", "Postman", "Cria e testa requisições de APIs.",
+                DESENVOLVIMENTO, false, Winget("Postman.Postman")),
+
+            new AppCatalogo("krita", "Krita", "Pintura digital e ilustração com mesa digitalizadora.",
+                IMAGEM, false, Winget("KDE.Krita")),
+            new AppCatalogo("darktable", "darktable", "Revelação de fotos RAW e fluxo de fotografia.",
+                IMAGEM, false, Winget("darktable.darktable")),
+            new AppCatalogo("kdenlive", "Kdenlive", "Edição de vídeo com múltiplas faixas e efeitos.",
+                VIDEO, false, Winget("KDE.Kdenlive")),
+            new AppCatalogo("audacity", "Audacity", "Gravação e edição de áudio para voz e podcasts.",
+                AUDIO, false, Winget("Audacity.Audacity")),
+            new AppCatalogo("musescore", "MuseScore Studio", "Cria, edita e reproduz partituras musicais.",
+                AUDIO, false, Winget("Musescore.Musescore")),
+            new AppCatalogo("spotify", "Spotify", "Músicas e podcasts; requer conta, com plano opcional.",
+                AUDIO, false, Winget("Spotify.Spotify")),
+            new AppCatalogo("foobar2000", "foobar2000", "Player leve para organizar e ouvir músicas locais.",
+                AUDIO, false, Winget("PeterPawlowski.foobar2000")),
+
+            new AppCatalogo("blender", "Blender", "Modelagem, animação e renderização 3D.",
+                MODELAGEM, false, Winget("BlenderFoundation.Blender")),
+            new AppCatalogo("freecad", "FreeCAD", "CAD paramétrico para projetos e peças 3D.",
+                MODELAGEM, false, Winget("FreeCAD.FreeCAD")),
+            new AppCatalogo("kicad", "KiCad", "Esquemas eletrônicos e desenho de placas de circuito.",
+                MODELAGEM, false, Winget("KiCad.KiCad")),
+            new AppCatalogo("cura", "UltiMaker Cura", "Prepara modelos para impressão 3D; configure sua máquina.",
+                MODELAGEM, false, Winget("Ultimaker.Cura")),
+
+            new AppCatalogo("steam", "Steam", "Loja e biblioteca de jogos; requer conta.",
+                JOGOS, false, Winget("Valve.Steam")),
+            new AppCatalogo("epicgames", "Epic Games Launcher", "Biblioteca de jogos da Epic; requer conta.",
+                JOGOS, false, Winget("EpicGames.EpicGamesLauncher")),
+            new AppCatalogo("gog", "GOG GALAXY", "Cliente da loja GOG e biblioteca de jogos.",
+                JOGOS, false, Winget("GOG.Galaxy")),
+            new AppCatalogo("playnite", "Playnite", "Reúne bibliotecas de diferentes lojas de jogos.",
+                JOGOS, false, Winget("Playnite.Playnite")),
+
+            new AppCatalogo("keepassxc", "KeePassXC", "Cofre de senhas local com banco criptografado.",
+                SEGURANCA, false, Winget("KeePassXCTeam.KeePassXC")),
+            new AppCatalogo("veracrypt", "VeraCrypt", "Volumes criptografados; configuração manual necessária.",
+                SEGURANCA, false, Winget("IDRIX.VeraCrypt")),
+
+            new AppCatalogo("teamviewer", "TeamViewer", "Suporte remoto; uso profissional exige licença.",
+                SUPORTE, false, Winget("TeamViewer.TeamViewer")),
+            new AppCatalogo("anydesk", "AnyDesk", "Suporte remoto; uso profissional pode exigir licença.",
+                SUPORTE, false, Winget("AnyDesk.AnyDesk")),
+            new AppCatalogo("winscp", "WinSCP", "Transferência de arquivos por SFTP, SCP e FTP.",
+                SUPORTE, false, Winget("WinSCP.WinSCP")),
+            new AppCatalogo("putty", "PuTTY", "Conexões SSH e serial para administração de sistemas.",
+                SUPORTE, false, Winget("PuTTY.PuTTY")),
+            new AppCatalogo("wireshark", "Wireshark", "Análise de tráfego de rede; captura pode exigir Npcap.",
+                SUPORTE, false, Winget("WiresharkFoundation.Wireshark")),
+
+            new AppCatalogo("cpuz", "CPU-Z", "Identifica processador, placa-mãe e memória.",
+                DIAGNOSTICO, false, Winget("CPUID.CPU-Z")),
+            new AppCatalogo("hwinfo", "HWiNFO", "Sensores e hardware; confira a licença para uso comercial.",
+                DIAGNOSTICO, false, Winget("REALiX.HWiNFO")),
+            new AppCatalogo("crystaldiskinfo", "CrystalDiskInfo", "Mostra saúde e dados SMART de SSDs e discos.",
+                DIAGNOSTICO, false, Winget("CrystalDewWorld.CrystalDiskInfo")),
+            new AppCatalogo("windirstat", "WinDirStat", "Visualiza quais pastas e arquivos ocupam o disco.",
+                DIAGNOSTICO, false, Winget("WinDirStat.WinDirStat")),
+
+            new AppCatalogo("nvda", "NVDA", "Leitor de tela gratuito para pessoas com deficiência visual.",
+                ACESSIBILIDADE, false, Winget("NVAccess.NVDA")),
+            new AppCatalogo("balabolka", "Balabolka", "Lê textos em voz alta usando as vozes do Windows.",
+                ACESSIBILIDADE, false, Winget("CrossPlusA.Balabolka")),
+            new AppCatalogo("sharex", "ShareX", "Capturas de tela, gravações e anotações.",
+                UTILITARIOS, false, Winget("ShareX.ShareX")),
+            new AppCatalogo("localsend", "LocalSend", "Transfere arquivos entre aparelhos na mesma rede.",
+                UTILITARIOS, false, Winget("LocalSend.LocalSend")),
         };
+
+        public static bool Corresponde(AppCatalogo app, string termo, string categoria)
+        {
+            if (!string.IsNullOrEmpty(categoria) && app.Categoria != categoria) return false;
+            if (string.IsNullOrWhiteSpace(termo)) return true;
+            string texto = app.Nome + " " + app.Descricao + " " + app.Categoria;
+            return CultureInfo.GetCultureInfo("pt-BR").CompareInfo.IndexOf(texto, termo.Trim(),
+                CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace) >= 0;
+        }
 
         public static AppCatalogo Achar(string chave)
         {
@@ -330,8 +485,9 @@ namespace AutoInstall
         {
             var lista = new List<AppCatalogo>();
             if (chaves == null) return lista;
-            foreach (AppCatalogo a in Apps)
-                if (chaves.Contains(a.Chave)) lista.Add(a);
+            foreach (string categoria in Categorias)
+                foreach (AppCatalogo a in Da(categoria))
+                    if (chaves.Contains(a.Chave)) lista.Add(a);
             return lista;
         }
     }

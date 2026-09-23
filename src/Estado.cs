@@ -45,6 +45,7 @@ namespace AutoInstall
         public string PlanoUltra { get; set; }      // GUID do plano temporario (para remover no final)
         public string PlanoOriginal { get; set; }   // GUID do plano ativo antes de tudo
         public List<RodadaUpdates> Rodadas { get; set; }
+        public List<string> AvisosWindowsUpdate { get; set; }
         public List<AppInstalado> Apps { get; set; }
         public List<string> Upgrades { get; set; }
         public List<string> Preparo { get; set; }   // etapa 0: instaladores em dia
@@ -71,6 +72,7 @@ namespace AutoInstall
         public Estado()
         {
             Rodadas = new List<RodadaUpdates>();
+            AvisosWindowsUpdate = new List<string>();
             Apps = new List<AppInstalado>();
             Upgrades = new List<string>();
             Preparo = new List<string>();
@@ -100,6 +102,7 @@ namespace AutoInstall
                     if (e != null && e.Versao == VERSAO_ATUAL)
                     {
                         if (e.Rodadas == null) e.Rodadas = new List<RodadaUpdates>();
+                        if (e.AvisosWindowsUpdate == null) e.AvisosWindowsUpdate = new List<string>();
                         if (e.Apps == null) e.Apps = new List<AppInstalado>();
                         if (e.Upgrades == null) e.Upgrades = new List<string>();
                         if (e.Preparo == null) e.Preparo = new List<string>();
