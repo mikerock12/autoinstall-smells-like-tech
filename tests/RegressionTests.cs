@@ -33,6 +33,9 @@ class RegressionTests
     class Cenario
     {
         public int Segundos, Abortos, Avisos;
+        public readonly List<string> MensagensStatus = new List<string>();
+        public readonly List<string> MensagensLog = new List<string>();
+        public string Operacao = "Operação";
         public int Fim = 3;
         public int Limite = 10;
         public int Graca = 4;
@@ -46,9 +49,9 @@ class RegressionTests
             EsperaWindowsUpdate.Aguardar(() => Segundos >= Fim, Progresso,
                 PodeAbortar ? (Action)delegate { Abortos++; if (ConfirmaAborto) Fim = Segundos + 2; } : null,
                 Controle, TimeSpan.FromSeconds(Limite), TimeSpan.FromSeconds(Graca),
-                delegate { Avisos++; }, () => TimeSpan.FromSeconds(Segundos),
+                delegate(string mensagem) { Avisos++; MensagensStatus.Add(mensagem); }, () => TimeSpan.FromSeconds(Segundos),
                 delegate { Segundos++; if (AoEsperar != null) AoEsperar();
-                    if (Segundos > 10000) throw new Exception("Espera sem limite no teste"); });
+                    if (Segundos > 10000) throw new Exception("Espera sem limite no teste"); }, MensagensLog.Add, Operacao);
         }
     }
     static void TestarEspera()
@@ -90,9 +93,45 @@ class RegressionTests
         Conferir(instalando.Abortos == 0 && instalando.Segundos == 3700 && instalando.Avisos > 0,
             "Instalacao lenta deve aguardar com heartbeat e nunca ser abortada");
 
+        // Reproduz a imagem: instalacao longa, percentual parado por minutos,
+        // depois avancando. A espera nao deve ser apresentada como erro.
+        var imagem = new Cenario { Fim = 670, PodeAbortar = false, Limite = 0, Operacao = "Instalação" };
+        imagem.Progresso = () => imagem.Segundos < 570 ? "item:62:100" : "item:80:100";
+        imagem.Rodar();
+        Conferir(imagem.MensagensStatus.Count > 10 && imagem.MensagensStatus.All(m =>
+            m.StartsWith("Instalação em andamento") && !m.Contains("sem mudança") && !m.Contains("falhou")),
+            "Espera normal deve informar instalacao em andamento mesmo com percentual parado");
+        Conferir(imagem.MensagensLog.Count == 0, "Heartbeats de instalacao nao devem inundar o log");
+
+        var cancelamentoLento = new Cenario { Fim = int.MaxValue, Limite = 30, Graca = 61, ConfirmaAborto = false };
+        EsperarExcecao<WindowsUpdateEmAndamentoException>(cancelamentoLento.Rodar);
+        Conferir(cancelamentoLento.MensagensLog.Count == 1 && cancelamentoLento.MensagensLog[0].Contains("cancelando"),
+            "Timeout verdadeiro deve continuar registrado no log");
+        Conferir(cancelamentoLento.MensagensStatus.Last().Contains("cancelando") &&
+            cancelamentoLento.MensagensStatus.All(m => !m.Contains("em andamento")),
+            "Heartbeat nao deve sobrescrever o aviso de cancelamento pendente");
+
         foreach (Type tipo in new[] { typeof(AtualizadorWindows.CallbackFim),
             typeof(AtualizadorWindows.CallbackDownload), typeof(AtualizadorWindows.CallbackInstalacao) })
             Conferir(Marshal.IsTypeVisibleFromCom(tipo), "Callback deve estar visivel para COM: " + tipo.Name);
+    }
+    static void TestarProgressoInstalacao()
+    {
+        var busca = new ResultadoBusca();
+        for (int i = 0; i < 35; i++) busca.Itens.Add(new ItemUpdate { Titulo = "Atualização " + i });
+        var indices = Enumerable.Range(0, 20).Concat(Enumerable.Range(30, 5)).ToList();
+        int geral = -1, posicao = -1, pctItem = -1;
+        string titulo = null;
+        Action<int, int, int, string> receber = delegate(int pct, int idx, int item, string nome)
+        { geral = pct; posicao = idx; pctItem = item; titulo = nome; };
+        AtualizadorWindows.NotificarProgressoInstalacao(busca, indices, 0, 25, 21, 62, 100, receber);
+        Conferir(geral == 62 && posicao == 22 && titulo == "Atualização 31" && pctItem == 100,
+            "35 encontrados e 25 baixados: posicao na fila baixada deve corresponder ao titulo original");
+        AtualizadorWindows.NotificarProgressoInstalacao(busca, new List<int> { 34 }, 24, 25, 0, 100, 100, receber);
+        Conferir(geral == 100 && posicao == 25 && titulo == "Atualização 34",
+            "Ultima exclusiva deve fechar em 25 de 25 e 100 por cento");
+        AtualizadorWindows.NotificarProgressoInstalacao(busca, indices, 0, 25, 25, 100, 100, receber);
+        Conferir(posicao == 25 && geral == 100, "Indice final do agente nao pode exceder o total da fila");
     }
     static T Campo<T>(object objeto, string nome)
     {
@@ -110,7 +149,8 @@ class RegressionTests
         Conferir(!Catalogo.Corresponde(Catalogo.Achar("steam"), "steam", Catalogo.ESTUDOS), "Filtro de categoria");
         var antigos = "chrome firefox brave 7zip winrar notepadpp office365 libreoffice acrobat vscode git node python innosetup terminal pwsh paintnet gimp inkscape irfanview vlc klite obs shotcut handbrake malwarebytes adwcleaner bitdefender bitwarden chatgpt claude ollama lmstudio powertoys everything rufus".Split(' ');
         Conferir(antigos.All(c => Catalogo.Achar(c) != null), "Preservar todas as chaves da versao anterior");
-        Conferir(Catalogo.Apps.Where(a => !antigos.Contains(a.Chave)).All(a => !a.Recomendado), "Novas opcoes devem ser opt-in");
+        Conferir(Catalogo.Apps.Where(a => a.Recomendado).Select(a => a.Chave).OrderBy(x => x).SequenceEqual(new[] { "chrome", "7zip", "office365", "acrobat", "whatsapp", "telegram", "vlc", "klite" }.OrderBy(x => x)), "Recomendados devem ser exatamente os oito apps definidos");
+        Conferir(Catalogo.Achar("klite").Metodos[0].Alvo == "CodecGuide.K-LiteCodecPack.Mega", "K-Lite deve instalar a edicao Mega");
         var js = new JavaScriptSerializer();
         var legado = js.Deserialize<Estado>("{\"Versao\":2,\"Fase\":\"updates\",\"Escolhidos\":[\"chrome\",\"acrobat\"]}");
         Conferir(legado.AvisosWindowsUpdate != null && Catalogo.Resolver(legado.Escolhidos).Count == 2,
@@ -204,6 +244,7 @@ class RegressionTests
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             TestarEspera();
+            TestarProgressoInstalacao();
             TestarCatalogoETela();
             if (args.Contains("--wu-smoke")) SmokeCom();
             Console.WriteLine("OK: " + verificacoes + " verificacoes; " + Catalogo.Apps.Length + " apps / " + Catalogo.Categorias.Length + " categorias.");
