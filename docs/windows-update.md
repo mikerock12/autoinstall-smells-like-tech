@@ -42,13 +42,33 @@ de cada lote, sem consultar o sinalizador de reinicialização.
 - O estado de versão 2 continua compatível e todas as chaves antigas do
   catálogo foram preservadas.
 
+## Mensagens de espera e contagem (2.3.1)
+
+Durante uma instalação, o percentual de um item pode ficar parado enquanto
+Windows conclui etapas internas. A versão 2.3.0 repetia a cada 30 segundos
+"sem mudança de progresso" na tela e no log, dando a impressão de erro mesmo
+quando a instalação continuava normalmente. Esse aviso não era um resultado
+de falha do agente.
+
+A tela agora informa "Instalação em andamento" e o tempo decorrido. O aviso
+periódico não preenche o log; cancelamentos, timeouts reais e resultados por
+item continuam registrados. Enquanto um cancelamento está pendente, o aviso
+de cancelamento permanece na tela.
+
+A fila de instalação usa somente os itens baixados. A numeração e o percentual
+agora seguem essa fila, mantendo o título da atualização original. Por exemplo,
+35 itens encontrados e 25 baixados mostram uma posição entre 1 e 25, incluindo
+as exclusivas instaladas separadamente, em vez de "32 de 35" numa etapa de 25.
+
 ## Verificação automatizada
 
 `tools/testar.ps1` usa relógio simulado para reproduzir a ausência de callbacks,
 timeout, parada durante a busca, cancelamento que não termina, bytes avançando,
 download que deixa de avançar e instalação demorada. Confere também a exposição
 COM dos callbacks, compatibilidade do estado, ausência de chaves duplicadas,
-seleção preservada nos filtros e relatório de falha de consulta.
+seleção preservada nos filtros e relatório de falha de consulta. Também reproduz
+uma instalação com percentual parado por minutos, verifica que o log permanece
+sem avisos falsos e confere a contagem com downloads parciais e exclusivas.
 
 `-WindowsUpdateLocal` acrescenta uma busca real no cache do Windows Update,
 sem registrar serviços, aceitar licenças, baixar ou instalar atualizações.
@@ -68,8 +88,7 @@ a aplicação não encerra processos ou serviços do Windows para forçar seu fi
 
 Log: `%ProgramData%\SmellsLikeTech\AutoInstall\log.txt`.
 Estado: `%ProgramData%\SmellsLikeTech\AutoInstall\estado.json`.
-Se o agente deixar de responder, o log identifica a operação e o tempo sem
-avanço. Aguarde a operação do Windows terminar antes de reabrir para retomar.
+Se busca/download atingir o limite sem avanço, o log registra o cancelamento. Aguarde a operação do Windows terminar antes de reabrir para retomar.
 
 ## Referências
 

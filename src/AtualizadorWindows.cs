@@ -37,11 +37,7 @@ namespace AutoInstall
         IUpdateSession3 sessao;
 
         void Log(string mensagem) { if (AoLogar != null) AoLogar(mensagem); }
-        void Status(string mensagem)
-        {
-            Log(mensagem);
-            if (AoAguardar != null) AoAguardar(mensagem);
-        }
+
 
         IUpdateSession3 ObterSessao()
         {
@@ -78,7 +74,7 @@ namespace AutoInstall
             try
             {
                 Esperar(delegate { return job.IsCompleted; }, null, job.RequestAbort, controle,
-                    TimeSpan.FromMinutes(10));
+                    TimeSpan.FromMinutes(10), "Busca");
                 resultado = buscador.EndSearch(job);
             }
             finally { LimparSeConcluido(delegate { return job.IsCompleted; }, job.CleanUp); }
@@ -131,7 +127,7 @@ namespace AutoInstall
                             idx >= 0 && idx < busca.Total ? busca.Itens[idx].Titulo : "");
                     // Bytes contam como atividade mesmo quando a porcentagem nao muda.
                     return p.TotalBytesDownloaded + ":" + idx + ":" + p.CurrentUpdateDownloadPhase;
-                }, job.RequestAbort, controle, TimeSpan.FromMinutes(15));
+                }, job.RequestAbort, controle, TimeSpan.FromMinutes(15), "Download");
                 resultado = dl.EndDownload(job);
             }
             finally { LimparSeConcluido(delegate { return job.IsCompleted; }, job.CleanUp); }
@@ -151,11 +147,11 @@ namespace AutoInstall
         public void Instalar(ResultadoBusca busca, ControleExecucao controle)
         {
             IUpdateSession3 s = ObterSessao();
-            int total = busca.Total;
+            int total = busca.Baixados;
             RebootNecessario = false;
             var lote = new List<int>();
             var exclusivas = new List<int>();
-            for (int i = 0; i < total; i++)
+            for (int i = 0; i < busca.Total; i++)
             {
                 if (!busca.Itens[i].Baixado) continue;
                 if ((int)busca.Colecao[i].InstallationBehavior.Impact == 2) exclusivas.Add(i);
@@ -201,13 +197,10 @@ namespace AutoInstall
                     {
                         IInstallationProgress p = job.GetProgress();
                         int k = p.CurrentUpdateIndex;
-                        int original = k >= 0 && k < indices.Count ? indices[k] : indices[0];
-                        int geral = (jaConcluidas * 100 + p.PercentComplete * indices.Count) / total;
-                        if (AoProgredirInstalacao != null)
-                            AoProgredirInstalacao(geral, original + 1, p.CurrentUpdatePercentComplete,
-                                busca.Itens[original].Titulo);
+                        NotificarProgressoInstalacao(busca, indices, jaConcluidas, total,
+                            k, p.PercentComplete, p.CurrentUpdatePercentComplete, AoProgredirInstalacao);
                         return k + ":" + p.PercentComplete + ":" + p.CurrentUpdatePercentComplete;
-                    }, null, null, TimeSpan.Zero); // Nunca aborta uma instalacao ativa.
+                    }, null, null, TimeSpan.Zero, "Instalação"); // Nunca aborta uma instalacao ativa.
                     resultado = inst.EndInstall(job);
                 }
                 finally { LimparSeConcluido(delegate { return job.IsCompleted; }, job.CleanUp); }
@@ -231,10 +224,25 @@ namespace AutoInstall
             }
         }
 
-        void Esperar(Func<bool> concluido, Func<string> progresso, Action abortar,
-            ControleExecucao controle, TimeSpan limite)
+        internal static void NotificarProgressoInstalacao(ResultadoBusca busca, List<int> indices,
+            int jaConcluidas, int total, int indiceParte, int percentualParte, int percentualItem,
+            Action<int, int, int, string> progresso)
         {
-            try { EsperaWindowsUpdate.Aguardar(concluido, progresso, abortar, controle, limite, Status); }
+            if (progresso == null || indices.Count == 0 || total <= 0) return;
+            int k = Math.Max(0, Math.Min(indiceParte, indices.Count - 1));
+            int original = indices[k];
+            int geral = (jaConcluidas * 100 + percentualParte * indices.Count) / total;
+            // A posicao na fila baixada e diferente do indice na busca original:
+            // itens sem download e exclusivas podem deixar lacunas na busca.
+            progresso(Math.Max(0, Math.Min(geral, 100)), jaConcluidas + k + 1, percentualItem,
+                busca.Itens[original].Titulo);
+        }
+
+        void Esperar(Func<bool> concluido, Func<string> progresso, Action abortar,
+            ControleExecucao controle, TimeSpan limite, string operacao)
+        {
+            try { EsperaWindowsUpdate.Aguardar(concluido, progresso, abortar, controle, limite,
+                AoAguardar, Log, operacao); }
             catch (TimeoutException) { throw; }
             catch (OperationCanceledException) { throw; }
             catch (WindowsUpdateEmAndamentoException) { throw; }

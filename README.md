@@ -23,7 +23,8 @@ Downloads são cancelados após 15 minutos sem avanço dos bytes recebidos.
 Busca e download têm até três tentativas em caso de exceção ou timeout, sempre
 aguardando a confirmação do cancelamento antes de repetir. A conclusão e o
 progresso são consultados diretamente no agente, sem depender da entrega dos
-callbacks COM. A cada 30 segundos há uma indicação de atividade no log e na tela.
+callbacks COM. A cada 30 segundos a tela mostra a etapa em andamento e o tempo
+decorrido. Essa espera normal não é registrada como erro nem repetida no log.
 
 Instalações em andamento são aguardadas sem encerramento forçado. Se o agente
 não confirmar o cancelamento em 60 segundos ou a comunicação com uma operação
@@ -205,3 +206,12 @@ salvo, o log ou qualquer configuração da máquina.
 
 **Maicon Nunes** — Smells Like Tech Informática  
 [GitHub](https://github.com/mikerock12) · [Site](https://www.smellsliketech.com.br)
+
+
+## Portal e publicações
+
+Demonstração, recursos e download da última versão: [Softwares SLT](https://softwares.smellsliketech.com.br/apps/autoinstall/).
+
+Cada merge em `main` passa pelo CI e gera uma nova release estável com SHA-256. O portal consulta a release mais recente automaticamente (cache de até cinco minutos). Código-fonte é mantido neste repositório; o projeto central apenas o referencia como submódulo.
+
+Recomendados: Google Chrome, 7-Zip, Microsoft 365, Adobe Reader, WhatsApp, Telegram, VLC Media Player e K-Lite Codec Pack **Mega**. Microsoft 365 requer licença.

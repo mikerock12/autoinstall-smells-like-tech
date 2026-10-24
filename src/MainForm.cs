@@ -400,12 +400,12 @@ namespace AutoInstall
             atualizador.AoProgredirInstalacao = delegate(int geral, int idx, int pctItem, string titulo)
             {
                 telaProg.Progresso(geral, string.Format("Instalando {0} de {1} ({2}% desta) — {3}",
-                    idx, busca.Total, pctItem, Curto(titulo)));
+                    idx, busca.Baixados, pctItem, Curto(titulo)));
             };
             if (busca.Baixados > 0)
                 await Task.Run(delegate { atualizador.Instalar(busca, controle); });
-            telaProg.Progresso(busca.Instalados * 100 / busca.Total,
-                string.Format("Instaladas: {0} de {1} atualização(ões).", busca.Instalados, busca.Total));
+            telaProg.Progresso(busca.Baixados > 0 ? busca.Instalados * 100 / busca.Baixados : 0,
+                string.Format("Instaladas: {0} de {1} atualização(ões) baixadas.", busca.Instalados, busca.Baixados));
             log("Instalação desta rodada concluída.");
 
             var registro = new RodadaUpdates();

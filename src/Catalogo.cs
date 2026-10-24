@@ -157,12 +157,12 @@ namespace AutoInstall
             // ---------------- Texto e documentos ----------------
             new AppCatalogo("notepadpp", "Notepad++",
                 "Bloco de notas com abas, sintaxe colorida e busca em pastas.",
-                TEXTO, true,
+                TEXTO, false,
                 Winget("Notepad++.Notepad++")),
 
             new AppCatalogo("office365", "Microsoft 365 (Word, Excel, PowerPoint)",
                 "Word, Excel e PowerPoint em português, pela via oficial.",
-                TEXTO, false,
+                TEXTO, true,
                 new MetodoInstalacao(Via.ODT, InstaladorOffice.PRODUTO)),
 
             new AppCatalogo("libreoffice", "LibreOffice",
@@ -178,14 +178,14 @@ namespace AutoInstall
             // ---------------- Desenvolvimento ----------------
             new AppCatalogo("vscode", "Visual Studio Code",
                 "Editor de código da Microsoft, leve e cheio de extensões.",
-                DESENVOLVIMENTO, true,
+                DESENVOLVIMENTO, false,
                 Winget("Microsoft.VisualStudioCode"),
                 Direto("https://update.code.visualstudio.com/latest/win32-x64-user/stable",
                        "/VERYSILENT /NORESTART /MERGETASKS=!runcode")),
 
             new AppCatalogo("git", "Git",
                 "Controle de versão; obrigatório para trabalhar com GitHub.",
-                DESENVOLVIMENTO, true,
+                DESENVOLVIMENTO, false,
                 Winget("Git.Git")),
 
             new AppCatalogo("node", "Node.js LTS",
@@ -219,7 +219,7 @@ namespace AutoInstall
             // ---------------- Imagem ----------------
             new AppCatalogo("paintnet", "paint.net",
                 "Editor de imagens rápido, com camadas e efeitos.",
-                IMAGEM, true,
+                IMAGEM, false,
                 Winget("dotPDN.PaintDotNet")),
 
             new AppCatalogo("gimp", "GIMP",
@@ -243,10 +243,10 @@ namespace AutoInstall
                 VIDEO, true,
                 Winget("VideoLAN.VLC")),
 
-            new AppCatalogo("klite", "K-Lite Codec Pack",
+            new AppCatalogo("klite", "K-Lite Codec Pack Mega",
                 "Codecs de áudio e vídeo atualizados + o player MPC-HC.",
                 VIDEO, true,
-                Winget("CodecGuide.K-LiteCodecPack.Standard")),
+                Winget("CodecGuide.K-LiteCodecPack.Mega")),
 
             new AppCatalogo("obs", "OBS Studio",
                 "Gravação de tela e transmissão ao vivo; padrão do meio.",
@@ -266,7 +266,7 @@ namespace AutoInstall
             // ---------------- Segurança ----------------
             new AppCatalogo("malwarebytes", "Malwarebytes",
                 "Remove vírus e adware que o antivírus comum deixa passar.",
-                SEGURANCA, true,
+                SEGURANCA, false,
                 Winget("Malwarebytes.Malwarebytes")),
 
             new AppCatalogo("adwcleaner", "AdwCleaner",
@@ -287,12 +287,12 @@ namespace AutoInstall
             // ---------------- IA ----------------
             new AppCatalogo("chatgpt", "ChatGPT",
                 "O aplicativo oficial da OpenAI para Windows.",
-                IA, true,
+                IA, false,
                 Loja("9PLM9XGG6VKS")),
 
             new AppCatalogo("claude", "Claude",
                 "App oficial da Anthropic; forte em texto e programação.",
-                IA, true,
+                IA, false,
                 Winget("Anthropic.Claude")),
 
             new AppCatalogo("ollama", "Ollama",
@@ -309,7 +309,7 @@ namespace AutoInstall
             // ---------------- Utilitários ----------------
             new AppCatalogo("powertoys", "Microsoft PowerToys",
                 "Utilitários oficiais: renomear em lote, cores, atalhos.",
-                UTILITARIOS, true,
+                UTILITARIOS, false,
                 Winget("Microsoft.PowerToys")),
 
             new AppCatalogo("everything", "Everything",
@@ -339,9 +339,9 @@ namespace AutoInstall
                 PDF, false, Winget("Cyanfish.NAPS2")),
 
             new AppCatalogo("whatsapp", "WhatsApp", "Mensagens e chamadas; requer conta e vinculação.",
-                COMUNICACAO, false, Loja("9NKSQGP7F2NH")),
+                COMUNICACAO, true, Loja("9NKSQGP7F2NH")),
             new AppCatalogo("telegram", "Telegram Desktop", "Mensagens, grupos e canais sincronizados.",
-                COMUNICACAO, false, Winget("Telegram.TelegramDesktop")),
+                COMUNICACAO, true, Winget("Telegram.TelegramDesktop")),
             new AppCatalogo("signal", "Signal", "Mensagens privadas vinculadas ao seu celular.",
                 COMUNICACAO, false, Winget("OpenWhisperSystems.Signal")),
             new AppCatalogo("discord", "Discord", "Comunidades, chat e chamadas de voz e vídeo.",
