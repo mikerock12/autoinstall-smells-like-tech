@@ -60,7 +60,35 @@ agora seguem essa fila, mantendo o título da atualização original. Por exempl
 35 itens encontrados e 25 baixados mostram uma posição entre 1 e 25, incluindo
 as exclusivas instaladas separadamente, em vez de "32 de 35" numa etapa de 25.
 
+## Resultados parciais e `0x80248007` (2.4.1)
+
+Uma captura de bancada mostrou `Resultado do download: orcSucceeded` seguido de
+três erros `0x80248007` e nenhuma instalação. A Microsoft define esse HRESULT
+como `WU_E_DS_NODATA`: a informação solicitada não está no repositório do
+Windows Update. A captura não distingue se a exceção veio de `GetUpdateResult`
+ou de `IsDownloaded`; a implementação anterior permitia que ambas interrompessem
+o processamento do lote depois que o download geral já havia terminado.
+
+A confirmação do download e a leitura do resultado detalhado agora são isoladas
+por item. Se o detalhe estiver ausente mas `IsDownloaded` confirmar o conteúdo,
+a atualização continua apta a instalar. Se o download não puder ser confirmado,
+o item fica fora da fila e o relatório conserva o título, o resultado disponível
+e o HRESULT. Uma exceção nessas consultas não inicia três novos downloads do
+lote inteiro nem descarta os itens válidos. A leitura dos resultados da
+instalação recebeu o mesmo isolamento, sem declarar sucesso quando o resultado
+não pode ser lido.
+
+Nenhum cache do Windows Update é apagado e nenhum serviço é reiniciado por essa
+correção. As causas externas de um download realmente malsucedido continuam
+exigindo diagnóstico no Windows; a alteração corrige o tratamento dos resultados
+parciais pela aplicação.
+
 ## Verificação automatizada
+
+Além dos cenários anteriores, os testes reproduzem `0x80248007` na leitura do
+resultado e na confirmação do download, preservam um download já confirmado,
+mantêm pendente um item não confirmado e continuam o registro da instalação
+seguinte. São 47 verificações na versão 2.4.1.
 
 `tools/testar.ps1` usa relógio simulado para reproduzir a ausência de callbacks,
 timeout, parada durante a busca, cancelamento que não termina, bytes avançando,

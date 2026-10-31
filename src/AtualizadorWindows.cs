@@ -63,6 +63,61 @@ namespace AutoInstall
             return ex.Message + string.Format(" (0x{0:X8})", ex.HResult);
         }
 
+        internal struct ResultadoComItem
+        {
+            public OperationResultCode Codigo;
+            public int HResult;
+        }
+
+        internal static void RegistrarResultadoDownload(ItemUpdate item,
+            Func<bool> confirmarDownload, Func<ResultadoComItem> lerResultado, Action<string> log)
+        {
+            bool baixado = false;
+            Exception erroConfirmacao = null;
+            try { baixado = confirmarDownload(); }
+            catch (Exception ex) { erroConfirmacao = ex; }
+
+            ResultadoComItem? resultado = null;
+            Exception erroResultado = null;
+            try { resultado = lerResultado(); }
+            catch (Exception ex) { erroResultado = ex; }
+
+            item.Baixado = baixado;
+            if (baixado)
+            {
+                item.Resultado = null;
+                if (erroResultado != null && log != null)
+                    log(item.Titulo + " — download confirmado pelo agente; resultado detalhado indisponível: " + Erro(erroResultado));
+                return;
+            }
+
+            var detalhes = new List<string>();
+            if (resultado.HasValue)
+                detalhes.Add(string.Format("{0} (0x{1:X8})", resultado.Value.Codigo, resultado.Value.HResult));
+            if (erroResultado != null) detalhes.Add("resultado: " + Erro(erroResultado));
+            if (erroConfirmacao != null) detalhes.Add("confirmação: " + Erro(erroConfirmacao));
+            item.Resultado = "download não confirmado" +
+                (detalhes.Count > 0 ? ": " + string.Join("; ", detalhes.ToArray()) : "");
+            if (log != null) log(item.Titulo + " — " + item.Resultado);
+        }
+
+        internal static void RegistrarResultadoInstalacao(ItemUpdate item,
+            Func<ResultadoComItem> lerResultado, Action<string> log)
+        {
+            try
+            {
+                ResultadoComItem r = lerResultado();
+                item.Resultado = r.Codigo == OperationResultCode.orcSucceeded ? "ok" :
+                    r.Codigo == OperationResultCode.orcSucceededWithErrors ? "ok com avisos" :
+                    string.Format("instalação falhou: {0} (0x{1:X8})", r.Codigo, r.HResult);
+            }
+            catch (Exception ex)
+            {
+                item.Resultado = "resultado da instalação indisponível: " + Erro(ex);
+            }
+            if (log != null) log(item.Titulo + " — " + item.Resultado);
+        }
+
         public ResultadoBusca Buscar(ControleExecucao controle)
         {
             if (controle != null && !controle.Prosseguir()) throw new OperationCanceledException();
@@ -135,12 +190,14 @@ namespace AutoInstall
             Log("Resultado do download: " + resultado.ResultCode + string.Format(" (0x{0:X8}).", resultado.HResult));
             for (int i = 0; i < busca.Total; i++)
             {
-                var r = resultado.GetUpdateResult(i);
-                var item = busca.Itens[i];
-                item.Baixado = busca.Colecao[i].IsDownloaded;
-                item.Resultado = item.Baixado ? null : string.Format(
-                    "download falhou: {0} (0x{1:X8})", r.ResultCode, r.HResult);
-                if (!item.Baixado) Log(item.Titulo + " — " + item.Resultado);
+                int indice = i;
+                RegistrarResultadoDownload(busca.Itens[indice],
+                    delegate { return busca.Colecao[indice].IsDownloaded; },
+                    delegate
+                    {
+                        var r = resultado.GetUpdateResult(indice);
+                        return new ResultadoComItem { Codigo = r.ResultCode, HResult = r.HResult };
+                    }, Log);
             }
         }
 
@@ -207,11 +264,13 @@ namespace AutoInstall
 
                 for (int k = 0; k < indices.Count; k++)
                 {
-                    var r = resultado.GetUpdateResult(k);
-                    busca.Itens[indices[k]].Resultado = r.ResultCode == OperationResultCode.orcSucceeded ? "ok" :
-                        r.ResultCode == OperationResultCode.orcSucceededWithErrors ? "ok com avisos" :
-                        string.Format("instalação falhou: {0} (0x{1:X8})", r.ResultCode, r.HResult);
-                    Log(busca.Itens[indices[k]].Titulo + " — " + busca.Itens[indices[k]].Resultado);
+                    int indice = k;
+                    RegistrarResultadoInstalacao(busca.Itens[indices[indice]],
+                        delegate
+                        {
+                            var r = resultado.GetUpdateResult(indice);
+                            return new ResultadoComItem { Codigo = r.ResultCode, HResult = r.HResult };
+                        }, Log);
                 }
                 if (resultado.RebootRequired) RebootNecessario = true;
             }

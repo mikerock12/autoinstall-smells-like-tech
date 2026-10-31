@@ -214,6 +214,54 @@ class RegressionTests
         Conferir(relatorio.Contains("Busca falhou") && !relatorio.Contains("nenhuma atualização pendente foi encontrada"),
             "Erro de busca nao deve virar relatorio de Windows atualizado");
     }
+    static void TestarResultadosWindowsUpdate()
+    {
+        var logs = new List<string>();
+        Func<AtualizadorWindows.ResultadoComItem> semDados = delegate
+        { throw new COMException("Dados ausentes", unchecked((int)0x80248007)); };
+
+        var pronto = new ItemUpdate { Titulo = "Atualização cumulativa" };
+        AtualizadorWindows.RegistrarResultadoDownload(pronto, () => true, semDados, logs.Add);
+        Conferir(pronto.Baixado && pronto.Resultado == null,
+            "Item confirmado como baixado nao pode ser descartado por metadado de resultado ausente");
+        Conferir(logs.Count == 1 && logs[0].Contains("Atualização cumulativa") && logs[0].Contains("0x80248007"),
+            "Perda do detalhe deve identificar o item e preservar o HRESULT");
+
+        var pendente = new ItemUpdate { Titulo = "Driver" };
+        AtualizadorWindows.RegistrarResultadoDownload(pendente, () => false, semDados, logs.Add);
+        Conferir(!pendente.Baixado && pendente.Resultado.Contains("download não confirmado") &&
+            pendente.Resultado.Contains("0x80248007"),
+            "Item sem download e sem metadado deve ficar pendente, nao derrubar o lote");
+
+        var falhaConfirmacao = new ItemUpdate { Titulo = "Driver antigo" };
+        AtualizadorWindows.RegistrarResultadoDownload(falhaConfirmacao,
+            delegate { throw new COMException("Dados ausentes", unchecked((int)0x80248007)); },
+            () => new AtualizadorWindows.ResultadoComItem {
+                Codigo = OperationResultCode.orcFailed, HResult = unchecked((int)0x80240034) }, logs.Add);
+        Conferir(!falhaConfirmacao.Baixado && falhaConfirmacao.Resultado.Contains("0x80240034") &&
+            falhaConfirmacao.Resultado.Contains("0x80248007"),
+            "Falha de confirmacao deve conservar o resultado e o erro da consulta");
+
+        var baixado = new ItemUpdate { Titulo = "Outra atualização", Resultado = "erro anterior" };
+        AtualizadorWindows.RegistrarResultadoDownload(baixado, () => true,
+            () => new AtualizadorWindows.ResultadoComItem {
+                Codigo = OperationResultCode.orcSucceeded, HResult = 0 }, logs.Add);
+        Conferir(baixado.Baixado && baixado.Resultado == null,
+            "Nova confirmacao de download deve limpar estado anterior antes da instalacao");
+
+        var instalado = new ItemUpdate { Titulo = "Atualização cumulativa" };
+        AtualizadorWindows.RegistrarResultadoInstalacao(instalado, semDados, logs.Add);
+        Conferir(instalado.Resultado.Contains("resultado da instalação indisponível") &&
+            instalado.Resultado.Contains("0x80248007"),
+            "Falha ao ler resultado de instalacao deve ficar somente no item afetado");
+
+        var seguinte = new ItemUpdate { Titulo = "Driver seguinte" };
+        AtualizadorWindows.RegistrarResultadoInstalacao(seguinte,
+            () => new AtualizadorWindows.ResultadoComItem {
+                Codigo = OperationResultCode.orcSucceededWithErrors, HResult = 0 }, logs.Add);
+        Conferir(seguinte.Resultado == "ok com avisos",
+            "Resultado de um item nao pode impedir o registro do item seguinte");
+    }
     static void SmokeCom()
     {
         // Somente leitura do cache local: nao registra servicos, nao aceita EULAs,
@@ -245,6 +293,7 @@ class RegressionTests
             Application.SetCompatibleTextRenderingDefault(false);
             TestarEspera();
             TestarProgressoInstalacao();
+            TestarResultadosWindowsUpdate();
             TestarCatalogoETela();
             if (args.Contains("--wu-smoke")) SmokeCom();
             Console.WriteLine("OK: " + verificacoes + " verificacoes; " + Catalogo.Apps.Length + " apps / " + Catalogo.Categorias.Length + " categorias.");
