@@ -33,6 +33,12 @@ Falhas entram no relatório; um erro de consulta não significa que o Windows es
 atualizado. Reinícios ocorrem somente quando solicitados pelo agente, com limite
 de oito rodadas/reinicializações.
 
+Na versão 2.4.1, a ausência de metadados de um item (`0x80248007`) não repete
+nem descarta o download inteiro. A confirmação e o resultado detalhado são
+tratados por atualização: somente downloads confirmados pelo agente entram na
+instalação, enquanto os demais permanecem pendentes com o erro no relatório.
+A leitura dos resultados de instalação também é isolada por item.
+
 ### Preparo dos instaladores
 
 Executado antes de qualquer instalação, porque instalador desatualizado é a
